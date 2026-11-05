@@ -3,36 +3,38 @@ import { computed, ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import ResourceSummary from '@shell/components/ResourceSummary.vue';
+import ResourceStatusCards from '@shell/pages/c/_cluster/explorer/resource-status/ResourceStatusCards.vue';
 import { NODE, WORKLOAD_TYPES } from '@shell/config/types';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
 import WidgetCard from './WidgetCard.vue';
-import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
+import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
 import { fetchClusterCounts, summarizeCounts, totalCounts } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
-// RESOURCE CARDS — the row under a cluster dashboard's header: Total Resources, Nodes, Deployments.
+// RESOURCE CARDS — the row under a cluster dashboard's header.
 //
-// Drawn by the dashboard's own ResourceSummary. On the dashboard it reads its counts from the
-// `cluster` store, which holds only the cluster that is open; here they come from the named
-// cluster's own counts, through ResourceSummary's `spoofedCounts` - the prop the dashboard itself
-// uses for the Total card. Same card, same numbers, any cluster.
+// On the cluster Rancher has open this IS the dashboard's ResourceStatusCards. Those read the `cluster`
+// store, which holds only that cluster, so for any other cluster the widget draws Rancher's
+// ResourceSummary - Total Resources, Nodes, Deployments - from that cluster's own counts, through its
+// `spoofedCounts`.
 
 const props = defineProps<{ widget: WidgetSpec }>();
 
 const store = useStore();
 const { t } = useI18n(store);
 const { cluster } = useWidgetCluster(() => props.widget);
+const isOpen = useOpenCluster(cluster);
 
 type Counts = Record<string, { summary?: { count?: number; states?: Record<string, number> } }>;
 
 const counts = ref<Counts | null>(null);
 const error = ref('');
 
-watch(cluster, async(id) => {
+watch([cluster, isOpen], async([id, open]) => {
   counts.value = null;
   error.value = '';
 
-  if (!id) {
+  if (!id || open) {
     return;
   }
 
@@ -74,8 +76,9 @@ const cards = computed(() => {
 </script>
 
 <template>
+  <ResourceStatusCards v-if="isOpen" />
   <WidgetCard
-    v-if="!cluster || error"
+    v-else-if="!cluster || error"
     :title="widget.title"
     :error="error || t(NO_CLUSTER)"
   />

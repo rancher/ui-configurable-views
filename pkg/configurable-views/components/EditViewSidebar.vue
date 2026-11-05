@@ -657,7 +657,8 @@ function valueOf(ev: Event): string {
     color:         var(--body-text);
     font-size:     14px;
     height:        32px;
-    padding:       0 10px;
+    // 1px more below than above: the font sits a little low in the box, in every browser.
+    padding:       0 10px 1px;
     width:         100%;
 
     &--num {

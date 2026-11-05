@@ -47,12 +47,12 @@ describe('extension: configurable-views', () => {
     });
   });
 
-  it('adds its product and navigation hook, and registers no paging of its own', async() => {
+  it('adds its product, reads nothing on the way in - its pages do - and registers no paging of its own', async() => {
     const plugin = await initialize();
 
     expect(plugin.addProduct).toHaveBeenCalledTimes(1);
     expect(plugin.addProduct).toHaveBeenCalledWith({ name: 'the product' }, ['the pages']);
-    expect(plugin.addNavHooks).toHaveBeenCalledWith({ onEnter: expect.any(Function) });
+    expect(plugin.addNavHooks).not.toHaveBeenCalled();
     expect(plugin.enableServerSidePagination).not.toHaveBeenCalled();
   });
 
@@ -69,7 +69,7 @@ describe('extension: configurable-views', () => {
 
     const action = plugin.addAction.mock.calls[1][2];
 
-    expect(action.shortcut).toStrictEqual({ windows: ['ctrl', 'shift', 'v'], mac: ['meta', 'shift', 'v'] });
+    expect(action.shortcut).toStrictEqual({ windows: ['shift', 'v'], mac: ['shift', 'v'] });
 
     const before = viewBarVisible.value;
 

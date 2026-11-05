@@ -8,12 +8,18 @@
 
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { RouteLocationRaw } from 'vue-router';
+import type { TableColumn } from '@shell/types/store/type-map';
+import { get } from '@shell/utils/object';
+import { valueFor } from '@shell/utils/table-columns';
 import { parseSi, createMemoryValues } from '@shell/utils/units';
 import { PaginationParamFilter } from '@shell/types/store/pagination.types';
-import { MANAGEMENT, METRIC, NODE } from '@shell/config/types';
+import {
+  CATALOG, ENDPOINTS, MANAGEMENT, METRIC, MONITORING, NODE
+} from '@shell/config/types';
 import { NODE_ROLES } from '@shell/config/labels-annotations';
 import { colorForState } from '@shell/plugins/dashboard-store/resource-class';
 import { colorToCountName } from '@shell/components/ResourceSummary';
+import { getClusterPrefix } from '@shell/utils/grafana';
 import { RESOURCES as DASHBOARD_RESOURCES } from '@shell/pages/c/_cluster/explorer/index.vue';
 import type { MetricsDashboard, ResourceRow } from './types';
 import type { TypeSchema } from './resource-types';
@@ -156,28 +162,39 @@ export function fetchManagementCluster<T = ResourceRow>(store: VuexStore, cluste
 const SHARED_MS = 5000;
 const shared = new Map<string, { at: number; promise: Promise<unknown> }>();
 
-function once<T>(key: string, load: () => Promise<T>): Promise<T> {
-  const hit = shared.get(key);
+function once<T>(store: VuexStore, key: string, load: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  // Per user, and nothing past its few seconds: a build with the package baked in keeps this across a
+  // log out, and what one person may read is not what the next may.
+  const ownKey = `${ store.getters['auth/user']?.id }|${ key }`;
 
-  if (hit && Date.now() - hit.at < SHARED_MS) {
+  shared.forEach((entry, k) => {
+    if (now - entry.at >= SHARED_MS) {
+      shared.delete(k);
+    }
+  });
+
+  const hit = shared.get(ownKey);
+
+  if (hit) {
     return hit.promise as Promise<T>;
   }
 
   const promise = load().catch((e) => {
-    shared.delete(key);
+    shared.delete(ownKey);
     throw e;
   });
 
-  shared.set(key, { at: Date.now(), promise });
+  shared.set(ownKey, { at: now, promise });
 
   return promise;
 }
 
-/** A cluster's counts: `{ <type>: { summary: { count, states } } }`, as Steve returns them. */
-export type ClusterCounts = Record<string, { summary?: { count?: number; states?: Record<string, number> } }>;
+/** A cluster's counts: `{ <type>: { summary: { count, states }, namespaces } }`, as Steve returns them. */
+export type ClusterCounts = Record<string, { summary?: { count?: number; states?: Record<string, number> }; namespaces?: Record<string, unknown> }>;
 
 export function fetchClusterCounts(store: VuexStore, cluster: string): Promise<ClusterCounts> {
-  return once(`counts|${ cluster }`, async() => {
+  return once(store, `counts|${ cluster }`, async() => {
     const res = await store.dispatch('management/request', { url: clusterUrl(cluster, 'counts') });
 
     return res?.data?.[0]?.counts || {};
@@ -426,6 +443,21 @@ export const METRICS_DASHBOARDS: Record<MetricsDashboard, { labelKey: string; de
   },
 };
 
+/**
+ * Whether a cluster has any app in the monitoring namespace: how the dashboard decides to show its
+ * Alerts tab, so that tab comes and goes here as it does there. Its metrics tabs ask for more (see
+ * fetchMetricsBoards).
+ */
+export async function hasMonitoringApps(store: VuexStore, cluster: string): Promise<boolean> {
+  try {
+    const counts = await fetchClusterCounts(store, cluster);
+
+    return !!counts[CATALOG.APP]?.namespaces?.[MONITORING_NS];
+  } catch (e) {
+    return false;
+  }
+}
+
 /** Whether a cluster has Rancher's monitoring, and which version - the version decides the Grafana URL's prefix. */
 export async function fetchMonitoring(store: VuexStore, cluster: string): Promise<{ installed: boolean; version: string }> {
   for (const name of ['rancher-monitoring-dashboards', 'rancher-monitoring']) {
@@ -439,6 +471,30 @@ export async function fetchMonitoring(store: VuexStore, cluster: string): Promis
   }
 
   return { installed: false, version: '' };
+}
+
+/**
+ * Which of a cluster's Grafana dashboards can be shown, by the questions the dashboard asks before it
+ * draws a metrics tab: does the cluster have pod monitors, does the Grafana service have somewhere to
+ * go, and is each of the tab's two dashboards there.
+ */
+export async function fetchMetricsBoards(store: VuexStore, cluster: string): Promise<MetricsDashboard[]> {
+  const read = (url: string) => store.dispatch('management/request', { url, redirectUnauthorized: false }).catch(() => null);
+  const [podMonitors, grafana, { version }] = await Promise.all([
+    read(clusterUrl(cluster, `schemas/${ MONITORING.PODMONITOR }`)),
+    read(clusterUrl(cluster, `${ ENDPOINTS }/${ MONITORING_NS }/rancher-monitoring-grafana`)),
+    fetchMonitoring(store, cluster),
+  ]);
+
+  if (!podMonitors || !grafana?.subsets?.length) {
+    return [];
+  }
+
+  const exists = (embedUrl: string) => read(`${ getClusterPrefix(version, cluster) }${ GRAFANA }/api/dashboards/uid/${ embedUrl.split('/d/')[1].split('/')[0] }`);
+  const boards = Object.keys(METRICS_DASHBOARDS) as MetricsDashboard[];
+  const found = await Promise.all(boards.map(async(board) => (await Promise.all([exists(METRICS_DASHBOARDS[board].detailUrl), exists(METRICS_DASHBOARDS[board].summaryUrl)])).every(Boolean)));
+
+  return boards.filter((_, i) => found[i]);
 }
 
 /** One alert as Alertmanager reports it - the fields the dashboard's alert table reads. */
@@ -485,6 +541,84 @@ export function objectRoute(cluster: string, {
       cluster, product: 'explorer', resource, id: name, ...(namespace ? { namespace } : {})
     },
   };
+}
+
+/** The route of one resource's detail page, with `-id` or `-namespace-id` after it. */
+const RESOURCE_ROUTE = 'c-cluster-product-resource';
+
+/** A location as a model builds it. */
+interface ModelLocation {
+  name?: string;
+  params?: Record<string, string | undefined>;
+}
+
+/**
+ * A model's location, in `cluster`. A model builds it from the cluster and product that are open, which
+ * on the Home or on another cluster's dashboard are not the ones its row belongs to.
+ */
+function locationIn(cluster: string, to?: ModelLocation | null): ModelLocation | null {
+  if (!to?.params) {
+    return to || null;
+  }
+
+  return {
+    ...to,
+    params: {
+      ...to.params, cluster, ...(to.name?.startsWith(RESOURCE_ROUTE) ? { product: 'explorer' } : {})
+    },
+  };
+}
+
+/**
+ * Where a row's detail page is, in `cluster`. The row's own namespace says whether it has one: the model
+ * asks the management store's schema, and that store has none for a type only this cluster serves.
+ */
+function rowLocation(cluster: string, row: ResourceRow): ModelLocation | null {
+  const to = locationIn(cluster, row.detailLocation as ModelLocation | undefined);
+  const namespace = row.metadata?.namespace;
+
+  return namespace && to?.name === `${ RESOURCE_ROUTE }-id` ? {
+    ...to, name: `${ RESOURCE_ROUTE }-namespace-id`, params: { ...to.params, namespace }
+  } : to;
+}
+
+/**
+ * A type's columns, with their links going to the cluster the rows are in.
+ *
+ * `LinkDetail` and `ClusterLink` take their link from us, so a row and what a column refers to (a volume's
+ * claim) keep the formatter they have. `LinkName` and `LinkNamePopover` read the open cluster and take nothing, which is
+ * right on that cluster's own page (`ownPage`) and nowhere else: there they become a `LinkDetail` with
+ * a link of their own. It goes in `formatterOpts`, which a table binds after its own `getCustomDetailLink`.
+ */
+export function columnsLinkingTo(headers: TableColumn[], cluster: string, ownPage: boolean): TableColumn[] {
+  return headers.map((header) => {
+    const opts = header.formatterOpts || {};
+
+    if (header.formatter === 'LinkDetail') {
+      return {
+        ...header,
+        formatterOpts: {
+          ...opts,
+          getCustomDetailLink: (row: ResourceRow) => (opts.reference ? locationIn(cluster, get(row, opts.reference)) : rowLocation(cluster, row)),
+        },
+      };
+    }
+
+    // A management cluster links to its provisioning cluster, when that is loaded.
+    if (header.formatter === 'ClusterLink') {
+      return { ...header, formatterOpts: { ...opts, getCustomDetailLink: (row: ResourceRow) => locationIn(cluster, get(row, 'provCluster.detailLocation')) } };
+    }
+
+    if (!ownPage && (header.formatter === 'LinkName' || header.formatter === 'LinkNamePopover')) {
+      return {
+        ...header,
+        formatter:     'LinkDetail',
+        formatterOpts: { getCustomDetailLink: (row: ResourceRow) => objectRoute(cluster, { kind: opts.type, name: valueFor(row, header) as string }) },
+      };
+    }
+
+    return header;
+  });
 }
 
 // ---- a cluster's component status ------------------------------------------------------------------

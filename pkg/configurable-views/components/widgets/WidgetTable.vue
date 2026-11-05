@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useStore } from 'vuex';
-import { CAPI, MANAGEMENT } from '@shell/config/types';
+import { CAPI, LOCAL_CLUSTER, MANAGEMENT } from '@shell/config/types';
 import { useI18n } from '@shell/composables/useI18n';
 import PaginatedResourceTable from '@shell/components/PaginatedResourceTable.vue';
 import ResourceTable from '@shell/components/ResourceTable.vue';
 import WidgetCard from './WidgetCard.vue';
-import { fetchClusterSchemas, storeForType } from '../../templating/widget-data';
+import { columnsLinkingTo, fetchClusterSchemas, storeForType } from '../../templating/widget-data';
 import { PAGINATION_CONTEXT } from '../../templating/widget-catalog';
 import type { TypeSchema } from '../../templating/resource-types';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
@@ -35,7 +35,7 @@ const props = withDefaults(defineProps<{ widget: WidgetSpec; nodeId?: string }>(
 
 const store = useStore();
 const { t } = useI18n(store);
-const { cluster } = useWidgetCluster(() => props.widget);
+const { cluster, pageCluster } = useWidgetCluster(() => props.widget);
 
 /** Rows per page: a widget is a glance at a list, not the list. */
 const PER_PAGE = 10;
@@ -75,28 +75,16 @@ watch(() => [downstream.value && !storeSchema.value ? props.widget.resource : ''
 
 const schema = computed(() => storeSchema.value || clusterSchema.value);
 
-/**
- * A type's header, minus the link into the resource's detail page.
- *
- * That link goes to the cluster in the page's URL, which is not the widget's: the Home has none, and
- * a cluster's dashboard can hold a widget showing another cluster. So it would break or lead to the
- * wrong cluster - the stock Home's own cluster table drops it for the same reason.
- */
-function withoutDetailLink(header: TableColumn): TableColumn {
-  if (header?.formatter !== 'LinkDetail') {
-    return header;
-  }
-
-  const { formatter, ...rest } = header;
-
-  return rest;
-}
+// The cluster the rows are in, which is the one their links go to: the one read from, or, for Rancher's
+// own API, the local cluster. That is rarely the one in the page's URL: the Home has none, and a
+// cluster's dashboard can hold a table of another cluster.
+const rowsCluster = computed(() => (downstream.value ? cluster.value : LOCAL_CLUSTER));
 
 /**
  * The type's own columns, as its list page has them - and, for a list the server pages, the ones the
  * server can sort and filter by.
  */
-const headersFor = (paged: boolean): TableColumn[] => (schema.value ? (store.getters['type-map/headersFor'](schema.value, paged) || []).map(withoutDetailLink) : []);
+const headersFor = (paged: boolean): TableColumn[] => (schema.value ? columnsLinkingTo(store.getters['type-map/headersFor'](schema.value, paged) || [], rowsCluster.value, pageCluster.value === rowsCluster.value) : []);
 const headers = computed(() => headersFor(false));
 const pagedHeaders = computed(() => headersFor(true));
 

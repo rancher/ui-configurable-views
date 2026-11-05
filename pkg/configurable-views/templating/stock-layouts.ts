@@ -97,13 +97,13 @@ export function stockWidgets(page: PageKey, t: Translate): WidgetNode[] {
     ];
   }
 
-  // The space above each part is the dashboard's own: its heading sits 10px lower than the page's
-  // inset, its extension cards 20px below the resource cards, and Capacity 40px.
+  // The space above each part is the dashboard's own: its extension cards 20px below the resource
+  // cards, and Capacity 28px.
   return [
-    part({ kind: WIDGET_CLUSTER_HEADER }, { above: 10 }),
+    part({ kind: WIDGET_CLUSTER_HEADER }),
     part({ kind: WIDGET_RESOURCE_CARDS }),
     part({ kind: WIDGET_EXTENSION_CARDS }, { above: 20 }),
-    part({ kind: WIDGET_CAPACITY }, { above: 40 }),
+    part({ kind: WIDGET_CAPACITY }, { above: 28 }),
     part({ kind: WIDGET_COMPONENT_STATUS }),
     tabs(t, [
       ['clusterIndexPage.sections.events.label', { kind: WIDGET_EVENTS }],

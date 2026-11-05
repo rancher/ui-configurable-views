@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { onBeforeUnmount, provide, ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import AlertTable from '@shell/components/AlertTable.vue';
 import SortableTable from '@shell/components/SortableTable/index.vue';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { fetchAlerts, fetchMonitoring, type Alert } from '../../templating/widget-data';
+import { fetchAlerts, hasMonitoringApps, type Alert } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
 // ALERTS — a cluster's firing alerts: the Alerts tab of its dashboard, as the dashboard draws it.
@@ -26,6 +26,9 @@ const store = useStore();
 const { t } = useI18n(store);
 const { cluster } = useWidgetCluster(() => props.widget);
 const isOpen = useOpenCluster(cluster);
+
+// A cluster's own table, as on its dashboard: no saved view tabs, which are kept per type.
+provide('showTableViewTabs', false);
 
 const monitoring = ref<boolean | null>(null);
 const alerts = ref<Alert[]>([]);
@@ -71,7 +74,7 @@ watch([cluster, isOpen], async([id, open]) => {
     return;
   }
 
-  monitoring.value = (await fetchMonitoring(store, id)).installed;
+  monitoring.value = await hasMonitoringApps(store, id);
 
   // The open cluster's alerts are the stock table's to read.
   if (monitoring.value && !open) {

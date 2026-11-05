@@ -80,15 +80,18 @@ watch(cluster, async(id) => {
     v-else-if="mgmt"
     class="wch"
   >
-    <div class="wch__title">
-      <h1>{{ widget.title || (followsPage ? t('clusterIndexPage.header') : mgmt.nameDisplay) }}</h1>
-      <div
-        v-if="mgmt.spec?.description"
-        class="wch__description"
-      >
-        {{ mgmt.spec.description }}
+    <!-- The dashboard's markup: the shell's global rules for a header and its title place these -->
+    <header>
+      <div class="title wch__title">
+        <h1>{{ widget.title || (followsPage ? t('clusterIndexPage.header') : mgmt.nameDisplay) }}</h1>
+        <div
+          v-if="mgmt.spec?.description"
+          class="wch__description"
+        >
+          {{ mgmt.spec.description }}
+        </div>
       </div>
-    </div>
+    </header>
     <div class="wch__glance">
       <div>
         <label>{{ t('glance.provider') }}: </label>
@@ -136,13 +139,18 @@ watch(cluster, async(id) => {
 // that page and so do not reach a widget.
 .wch__title {
   h1 {
-    margin: 0 0 10px;
+    margin: 0;
   }
 }
 
 .wch__description {
   margin: 5px 0;
   opacity: 0.7;
+}
+
+.cluster-tools-link {
+  display: flex;
+  margin-right: 10px;
 }
 
 .wch__glance {

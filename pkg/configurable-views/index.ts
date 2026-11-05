@@ -3,7 +3,7 @@ import { importTypes } from '@rancher/auto-import';
 import { ActionLocation, IPlugin, type Action } from '@shell/core/types';
 import type { ShellApi } from '@shell/apis';
 import { NotificationLevel } from '@shell/types/notifications';
-import { fetchTemplatingConfigMaps, toggleTemplating } from './templating/template-engine';
+import { toggleTemplating } from './templating/template-engine';
 import { product, pages } from './product';
 import Home from './pages/Home.vue';
 import ClusterDashboard from './pages/ClusterDashboard.vue';
@@ -43,8 +43,6 @@ export default function(plugin: IPlugin): void {
 
   plugin.addProduct(product, pages);
 
-  plugin.addNavHooks({ onEnter: (store) => fetchTemplatingConfigMaps(store) });
-
   // The two pages this package makes configurable, each replacing the stock one in place.
   //
   // The Home, under the home layout. A cluster's dashboard, as the child of the layout it already
@@ -59,15 +57,14 @@ export default function(plugin: IPlugin): void {
   });
 
   // The view bar is hidden until asked for: a header button on each configurable page shows and
-  // hides it, and Cmd/Ctrl + Shift + V does the same - V for views, beside the kill switch's
-  // Cmd/Ctrl + Shift + . The shell ignores the shortcut while the focus is in a text field, where it
-  // pastes without formatting.
+  // hides it, and Shift + V does the same - V for views, Shift and a letter as the shell's own page
+  // shortcuts are. The shell ignores the shortcut while the focus is in a text field, where it types.
   const toggleBar: Action = {
     labelKey:           'configurableViews.bar.toggle',
     tooltipKey:         'configurableViews.bar.toggle',
     disabledTooltipKey: 'configurableViews.bar.toggleLocked',
     icon:               'icon-list-flat',
-    shortcut:           { windows: ['ctrl', 'shift', 'v'], mac: ['meta', 'shift', 'v'] },
+    shortcut:           { windows: ['shift', 'v'], mac: ['shift', 'v'] },
     ariaExpanded:       () => viewBarVisible.value,
     // While a view is being edited the bar holds the way out of the editor, so the button is
     // disabled, and its tooltip says why. Read reactively by the header, and again at every click

@@ -986,7 +986,8 @@ $tab-height: 30px;
     font-size:     14px;
     height:        30px;
     min-height:    30px;
-    padding:       0 10px;
+    // 1px more below than above: the font sits a little low in the box, in every browser.
+    padding:       0 10px 1px;
     width:         180px;
   }
 

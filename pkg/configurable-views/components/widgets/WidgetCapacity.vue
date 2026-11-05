@@ -60,7 +60,9 @@ watch(cluster, async(id) => {
     :error="error || t(NO_CLUSTER)"
   />
   <div v-else-if="capacity?.hasStats">
-    <h3>{{ widget.title || t('clusterIndexPage.sections.capacity.label') }}</h3>
+    <h3 class="mmb-4 text-deemphasized">
+      {{ widget.title || t('clusterIndexPage.sections.capacity.label') }}
+    </h3>
     <div class="hardware-resource-gauges wcap__gauges">
       <HardwareResourceGauge
         :name="t('clusterIndexPage.hardwareResourceGauge.pods')"
@@ -89,9 +91,12 @@ watch(cluster, async(id) => {
 </template>
 
 <style lang="scss" scoped>
-// The dashboard's heading-then-gauges spacing. The shell gives the FIRST gauges row on a page 35px
-// on top; on the dashboard this row is not the first of its kind, here it is, so that rule is undone.
+// The dashboard's own rules for this row, which are scoped to that page. The shell gives the FIRST
+// gauges row on a page 35px on top; on the dashboard this row is not the first of its kind, here it
+// is, so that rule is undone.
 .wcap__gauges {
+  gap: var(--gap-md);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   margin-top: 0;
 }
 </style>

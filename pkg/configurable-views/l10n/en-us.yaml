@@ -214,7 +214,7 @@ configurableViews:
       desc: Name, state, provider and version of a cluster
     resourceCards:
       name: Resource cards
-      desc: A cluster’s total resources, nodes and deployments
+      desc: A cluster’s nodes, deployments and workloads at a glance
     capacity:
       name: Capacity
       desc: A cluster’s pods, CPU and memory, reserved against what it has

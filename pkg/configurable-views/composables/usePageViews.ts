@@ -198,23 +198,14 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
   });
 
   /**
-   * The first read can land before the user is known, or before the ConfigMaps exist; a few short
-   * retries cover a Home opened straight after login.
+   * Who is asking, then what is stored for them, read once. Nothing stored and no access to it are the
+   * same answer: Rancher's own page, straight away. A read that failed is read again on the next visit.
    */
   async function load(): Promise<void> {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      await fetchTemplatingConfigMaps(store);
+    await store.dispatch('auth/getUser').catch(() => undefined);
+    userId.value = store.getters['auth/user']?.id || null;
 
-      const user = await store.dispatch('auth/getUser').catch(() => null);
-
-      userId.value = user?.id || store.getters['auth/user']?.id || null;
-
-      if (scopes.value.user || scopes.value.global || attempt >= 4) {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+    await fetchTemplatingConfigMaps(store);
 
     syncActiveView();
     loaded.value = true;

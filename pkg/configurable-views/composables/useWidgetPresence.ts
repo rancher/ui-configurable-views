@@ -7,9 +7,9 @@ import { useRoute, useRouter, type Router } from 'vue-router';
 import { ExtensionPoint, CardLocation } from '@shell/core/types';
 import { getApplicableExtensionEnhancements } from '@shell/core/plugin-helpers';
 import { pageClusterOf } from './useWidgetCluster';
-import { fetchMonitoring } from '../templating/widget-data';
+import { fetchMetricsBoards, hasMonitoringApps } from '../templating/widget-data';
 import { WIDGET_ALERTS, WIDGET_METRICS, WIDGET_EXTENSION_CARDS, WIDGET_TABS } from '../templating/widget-catalog';
-import type { WidgetSpec } from '../templating/types';
+import type { MetricsDashboard, WidgetSpec } from '../templating/types';
 
 // Whether a widget has anything to show where it is.
 //
@@ -44,25 +44,31 @@ export function extensionCardsFor(self: ComponentOptionsMixin | undefined, route
   return getApplicableExtensionEnhancements<ExtensionCard>(self, ExtensionPoint.CARD, CardLocation.CLUSTER_DASHBOARD_CARD, route);
 }
 
-// Which clusters have Rancher's monitoring, shared by every widget: asked once per cluster, and again
-// after a minute, as a visit to the dashboard would. Unknown until the answer comes back.
+// What of Rancher's monitoring each cluster has, shared by every widget: asked once per person per
+// cluster, and again after a minute, as a visit to the dashboard would. Unknown until the answer comes
+// back, and an expired answer stands until then, so a tab does not blink while it is asked again. An
+// answer outlives neither its minute nor, in a build with the package baked in, a log out.
 const MONITORING_TTL_MS = 60000;
-const monitoring = reactive<Record<string, { installed: boolean; at: number }>>({});
+const monitoring = reactive<Record<string, { alerts: boolean; boards: MetricsDashboard[]; at: number }>>({});
 const asking = new Set<string>();
 
-function hasMonitoring(store: VuexStore, cluster: string): boolean | undefined {
-  const known = monitoring[cluster];
+function monitoringOf(store: VuexStore, cluster: string) {
+  const key = `${ store.getters['auth/user']?.id }|${ cluster }`;
+  const known = monitoring[key];
 
-  if ((!known || Date.now() - known.at > MONITORING_TTL_MS) && !asking.has(cluster)) {
-    asking.add(cluster);
-    fetchMonitoring(store, cluster)
-      .then(({ installed }) => {
-        monitoring[cluster] = { installed, at: Date.now() };
+  if ((!known || Date.now() - known.at > MONITORING_TTL_MS) && !asking.has(key)) {
+    asking.add(key);
+    Promise.all([hasMonitoringApps(store, cluster), fetchMetricsBoards(store, cluster)])
+      .then(([alerts, boards]) => {
+        Object.keys(monitoring).filter((k) => Date.now() - monitoring[k].at > MONITORING_TTL_MS).forEach((k) => delete monitoring[k]);
+        monitoring[key] = {
+          alerts, boards, at: Date.now()
+        };
       })
-      .finally(() => asking.delete(cluster));
+      .finally(() => asking.delete(key));
   }
 
-  return known?.installed;
+  return known;
 }
 
 export function useWidgetPresence() {
@@ -85,8 +91,9 @@ export function useWidgetPresence() {
 
     switch (spec.kind) {
     case WIDGET_ALERTS:
+      return monitoringOf(store, cluster)?.alerts === true;
     case WIDGET_METRICS:
-      return hasMonitoring(store, cluster) === true;
+      return !!monitoringOf(store, cluster)?.boards.includes(spec.metrics || 'cluster');
     case WIDGET_EXTENSION_CARDS:
       return extensionCardsFor(self, router, cluster).length > 0;
     default:

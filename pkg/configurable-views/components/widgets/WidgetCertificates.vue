@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, provide, ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -49,6 +49,9 @@ const store = useStore();
 const { t } = useI18n(store);
 const { cluster } = useWidgetCluster(() => props.widget);
 const isOpen = useOpenCluster(cluster);
+
+// A cluster's own table, as on its dashboard: no saved view tabs, which are kept per type.
+provide('showTableViewTabs', false);
 
 const allSecretsLink = computed<RouteLocationRaw>(() => ({
   name:   'c-cluster-product-resource',
