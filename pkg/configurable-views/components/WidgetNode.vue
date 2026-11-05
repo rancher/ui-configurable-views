@@ -563,18 +563,22 @@ function fitHeight(): void {
   // The header sits over the widget, so push the widget itself down by exactly its height —
   // nothing is ever hidden underneath it.
   &--editing > &__content {
-    padding-top: 25px;
+    padding-top: 26px;
   }
 
   // Traps the rendered widget's stacking context at level 0, so its own z-indexes can't cover the
   // editor chrome (and steal its clicks).
   // Kept to its cells: a widget wider than them - a table with many columns in a narrow tile, or in
   // a tab - scrolls sideways inside itself rather than running over its neighbours.
+  // A table's border is an outline, drawn just outside it, which that would cut off: the 1px around the
+  // content is its room, and the margin takes it back so nothing moves.
   &__content {
-    height:     100%;
+    height:     calc(100% + 2px);
     isolation:  isolate;
+    margin:     -1px;
     overflow-x: auto;
     overflow-y: hidden;
+    padding:    1px;
     position:   relative;
     z-index:    0;
 
