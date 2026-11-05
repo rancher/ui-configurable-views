@@ -179,8 +179,10 @@ export function useClusterOverview(cluster: MaybeRefOrGetter<string>) {
     };
   }
 
-  // The namespace picker belongs to the cluster that is open, so only for that cluster does a
-  // namespace card narrow it, as the overview's does. The card's links lead on by themselves.
+  /**
+   * The namespace picker belongs to the cluster that is open, so only for that cluster does a
+   * namespace card narrow it, as the overview's does. The card's links lead on by themselves.
+   */
   function filterByNamespace(namespace: string): void {
     const id = toValue(cluster);
 

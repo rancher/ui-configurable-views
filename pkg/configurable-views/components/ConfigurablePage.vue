@@ -91,8 +91,10 @@ const {
 
 pageViews.load();
 
-// While editing, the whole column around the grid - its padding, the room below it - is somewhere
-// to drop: a drag over it is the grid's. The grid stops the ones over itself before they get here.
+/**
+ * While editing, the whole column around the grid - its padding, the room below it - is somewhere
+ * to drop: a drag over it is the grid's. The grid stops the ones over itself before they get here.
+ */
 function dragOverPage(ev: DragEvent): void {
   if (editing.value) {
     grid.value?.onDragOver(ev);

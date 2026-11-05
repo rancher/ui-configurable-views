@@ -61,8 +61,10 @@ function part(spec: Partial<WidgetSpec> & { kind: WidgetSpec['kind'] }, {
   });
 }
 
-// A Tabs widget holding one part per tab, as the dashboard's Tabbed sections do - 30px below what
-// comes before, as the dashboard spaces them.
+/**
+ * A Tabs widget holding one part per tab, as the dashboard's Tabbed sections do - 30px below what
+ * comes before, as the dashboard spaces them.
+ */
 function tabs(t: Translate, entries: [labelKey: string, spec: Partial<WidgetSpec> & { kind: WidgetSpec['kind'] }][]): WidgetNode {
   return part({
     kind: WIDGET_TABS,

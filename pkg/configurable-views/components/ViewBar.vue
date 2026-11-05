@@ -145,8 +145,10 @@ const editingHint = computed(() => {
   return activeView.value?.org ? t('configurableViews.bar.publishedHint') : t('configurableViews.bar.personalHint');
 });
 
-// Rancher's own page is not the user's to change: it cannot be edited, renamed, published,
-// unpublished or deleted - only copied, and made the page's default.
+/**
+ * Rancher's own page is not the user's to change: it cannot be edited, renamed, published,
+ * unpublished or deleted - only copied, and made the page's default.
+ */
 const isStock = (view: View) => isStockView(view);
 
 /** No default set means Rancher's own page is the one the page opens on */

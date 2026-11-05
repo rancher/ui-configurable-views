@@ -30,9 +30,11 @@ export function useEditSession(
     settingsNodeId, saving, drawerOpen, error, userId, orgViews, orgTemplate, activeView, views, dirty,
   } = pageViews;
 
-  // With nothing of yours to edit - no views on this page, and the one showing is Rancher's own or
-  // the organization's - a first view is started for you. Not when a new view is about to be made
-  // anyway: that is the view you are starting, and seeding one as well left an empty extra behind.
+  /**
+   * With nothing of yours to edit - no views on this page, and the one showing is Rancher's own or
+   * the organization's - a first view is started for you. Not when a new view is about to be made
+   * anyway: that is the view you are starting, and seeding one as well left an empty extra behind.
+   */
   function enterEdit({ seedFirst = true } = {}): void {
     error.value = '';
 
@@ -116,7 +118,7 @@ export function useEditSession(
     }
   }
 
-  // Write the draft to your account.
+  /** Write the draft to your account. */
   async function save({ keepEditing = false } = {}): Promise<void> {
     const draft = working.value;
 
@@ -145,7 +147,7 @@ export function useEditSession(
     }
   }
 
-  // Keep the view you started from as it was, and save your changes as a view of their own.
+  /** Keep the view you started from as it was, and save your changes as a view of their own. */
   async function saveAsNewView(): Promise<void> {
     const draft = working.value;
     const view = pageViews.workingView();
@@ -175,7 +177,7 @@ export function useEditSession(
     await save();
   }
 
-  // The name typed into the bar while editing.
+  /** The name typed into the bar while editing. */
   function renameView(name: string): void {
     const view = pageViews.workingView();
 
@@ -184,8 +186,10 @@ export function useEditSession(
     }
   }
 
-  // A new view starts from the organization template when there is one — the design's "From the
-  // organization template. Not saved yet."
+  /**
+   * A new view starts from the organization template when there is one — the design's "From the
+   * organization template. Not saved yet."
+   */
   function newView(): void {
     if (!editing.value) {
       enterEdit({ seedFirst: false });
@@ -222,7 +226,7 @@ export function useEditSession(
       .map((p) => ({ id: p.id, label: t('configurableViews.page.copyOf', { name: p.name }) })),
   ]);
 
-  // The starting-point chips on a brand-new view: swap what it was seeded with.
+  /** The starting-point chips on a brand-new view: swap what it was seeded with. */
   function startFrom(sourceId: string): void {
     const view = pageViews.workingLayout();
 

@@ -179,7 +179,7 @@ function measurePadding(el: HTMLElement): Band[] {
   return out;
 }
 
-// Read the USED padding (always px, whatever unit was authored) for the band.
+/** Read the USED padding (always px, whatever unit was authored) for the band. */
 function measure(): void {
   const el = root.value;
 
@@ -209,8 +209,10 @@ onBeforeUnmount(() => {
   ro = null;
 });
 
-// A widget inside a Tabs widget is inside that widget's tile too, so the click is kept from reaching
-// the outer one - it would select the Tabs widget right after this one.
+/**
+ * A widget inside a Tabs widget is inside that widget's tile too, so the click is kept from reaching
+ * the outer one - it would select the Tabs widget right after this one.
+ */
 function onSelect(ev: MouseEvent): void {
   if (props.editing) {
     ev.stopPropagation();
@@ -218,8 +220,10 @@ function onSelect(ev: MouseEvent): void {
   }
 }
 
-// Hand the settings this widget's position so they open beside it rather than in the middle of
-// the screen — the whole point of settings "in place".
+/**
+ * Hand the settings this widget's position so they open beside it rather than in the middle of
+ * the screen — the whole point of settings "in place".
+ */
 function openSettings(): void {
   const r = root.value?.getBoundingClientRect();
 
@@ -321,7 +325,7 @@ function startResize(ev: PointerEvent, edge: 'start' | 'end' | 'bottom'): void {
   window.addEventListener('pointerup', onUp);
 }
 
-// Double-clicking the bottom edge lets the content decide the height again.
+/** Double-clicking the bottom edge lets the content decide the height again. */
 function fitHeight(): void {
   if (props.editing) {
     viewEditor.beginResize(props.node.id);

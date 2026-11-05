@@ -183,7 +183,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     }
   }
 
-  // Move to a view on purpose — and remember that it was on purpose.
+  /** Move to a view on purpose — and remember that it was on purpose. */
   function setActiveView(id: string | null): void {
     activeViewId.value = id;
     pinnedView.value = true;
@@ -197,8 +197,10 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     }
   });
 
-  // The first read can land before the user is known, or before the ConfigMaps exist; a few short
-  // retries cover a Home opened straight after login.
+  /**
+   * The first read can land before the user is known, or before the ConfigMaps exist; a few short
+   * retries cover a Home opened straight after login.
+   */
   async function load(): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt++) {
       await fetchTemplatingConfigMaps(store);
@@ -220,8 +222,10 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   // ---- writing ----
 
-  // Write a whole user-scope draft straight through (the view-mode actions, which have no draft). It
-  // shows at once, and the stored copy takes over when it lands.
+  /**
+   * Write a whole user-scope draft straight through (the view-mode actions, which have no draft). It
+   * shows at once, and the stored copy takes over when it lands.
+   */
   async function persist(draft: PageViews, activeId: string | null): Promise<void> {
     saving.value = true;
     error.value = '';

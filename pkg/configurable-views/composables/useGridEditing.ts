@@ -49,7 +49,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
   const flash = ref<Spacing | null>(null);
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Only what is changing is lit: a new change puts out the last one.
+  /** Only what is changing is lit: a new change puts out the last one. */
   function flashSpacing(which: Spacing): void {
     clearTimeout(flashTimer);
     flash.value = which;
@@ -75,8 +75,10 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
 
   // ---- grid mutations (draft only) ----
 
-  // Every change to the grid goes through here: it replaces the active view's widget list with a new
-  // one, so a mutation is always a pure list operation over a draft.
+  /**
+   * Every change to the grid goes through here: it replaces the active view's widget list with a new
+   * one, so a mutation is always a pure list operation over a draft.
+   */
   function mutate(fn: (widgets: WidgetNode[]) => WidgetNode[]): void {
     const view = pageViews.workingLayout();
 
@@ -94,7 +96,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
     }
   }
 
-  // Picking a widget brings the drawer back: its Layout tab is where a widget is set.
+  /** Picking a widget brings the drawer back: its Layout tab is where a widget is set. */
   function selectNode(id: string | null): void {
     selectedNodeId.value = id;
 
@@ -103,7 +105,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
     }
   }
 
-  // A click adds to the end of the view; a drop puts it where it was let go.
+  /** A click adds to the end of the view; a drop puts it where it was let go. */
   function addFromCatalog(entry: CatalogEntry | null, target?: DropTarget, place: WidgetPlace | null = null): void {
     if (!entry) {
       return;
@@ -140,8 +142,10 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
     ui.dragKind = '';
   }
 
-  // A drop on a grid - the view's, or a tab's (`place`): a catalog entry becomes a new widget there, a
-  // widget already on the view moves there. Either lands where it was let go (see grid-layout).
+  /**
+   * A drop on a grid - the view's, or a tab's (`place`): a catalog entry becomes a new widget there, a
+   * widget already on the view moves there. Either lands where it was let go (see grid-layout).
+   */
   function dropAt(target: DropTarget, place: WidgetPlace | null = null): void {
     const entry = ui.dragEntry;
     const id = ui.dragId;
@@ -201,7 +205,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
     resizeBase = null;
   }
 
-  // A width picked in the drawer is taken as given: what no longer fits beside it moves to a line below.
+  /** A width picked in the drawer is taken as given: what no longer fits beside it moves to a line below. */
   function setSelectedWidth(span: number): void {
     const id = selectedNodeId.value;
 
@@ -246,7 +250,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
     }
   }
 
-  // Its room is left empty: the widgets around it stay where they were put.
+  /** Its room is left empty: the widgets around it stay where they were put. */
   function removeNode(id: string): void {
     mutate((list) => liftWidget(list, id));
     if (selectedNodeId.value === id) {

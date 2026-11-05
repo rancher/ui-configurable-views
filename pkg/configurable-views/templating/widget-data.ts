@@ -73,18 +73,6 @@ export async function fetchClusterSchemas(store: VuexStore, cluster: string): Pr
   return res?.data || [];
 }
 
-/**
- * One page of a type, read from ONE named cluster.
- *
- * One, because a Kubernetes type lives behind its cluster's own Steve API and several clusters are
- * several APIs: no backend can answer "rows 9 to 16 of the three of them combined". So the widget
- * names a single cluster and gets real pagination — the backend is asked for that page and returns
- * it with the total count.
- *
- * Or `whole`: up to `cap` rows at once, for a table that pages, sorts and filters them itself (the
- * table views do, and only see what they hold). `truncated` says when the cluster had more, because a
- * total that quietly stops being a total is worse than a visible limit.
- */
 export interface ClusterPageArgs {
   resource: string;
   cluster: string;
@@ -105,6 +93,18 @@ export interface ClusterPage {
   serverPaged: boolean;
 }
 
+/**
+ * One page of a type, read from ONE named cluster.
+ *
+ * One, because a Kubernetes type lives behind its cluster's own Steve API and several clusters are
+ * several APIs: no backend can answer "rows 9 to 16 of the three of them combined". So the widget
+ * names a single cluster and gets real pagination — the backend is asked for that page and returns
+ * it with the total count.
+ *
+ * Or `whole`: up to `cap` rows at once, for a table that pages, sorts and filters them itself (the
+ * table views do, and only see what they hold). `truncated` says when the cluster had more, because a
+ * total that quietly stops being a total is worse than a visible limit.
+ */
 export async function fetchClusterPage(store: VuexStore, {
   resource, cluster, page = 1, pageSize = 10, sort = [], filters = [], whole = false, cap = 500
 }: ClusterPageArgs): Promise<ClusterPage> {
@@ -184,13 +184,6 @@ export function fetchClusterCounts(store: VuexStore, cluster: string): Promise<C
   });
 }
 
-/**
- * One type's counts, split the way the dashboard's resource cards split them.
- *
- * The same arithmetic as ResourceSummary's `resourceCounts`, over counts we fetched rather than the
- * `cluster` store's - which only ever holds the current cluster's. Built from the two helpers it is
- * built from, so a state means the same colour here as there.
- */
 /** One ResourceSummary card's numbers. */
 export interface CountSummary {
   total: number;
@@ -199,6 +192,13 @@ export interface CountSummary {
   errorCount: number;
 }
 
+/**
+ * One type's counts, split the way the dashboard's resource cards split them.
+ *
+ * The same arithmetic as ResourceSummary's `resourceCounts`, over counts we fetched rather than the
+ * `cluster` store's - which only ever holds the current cluster's. Built from the two helpers it is
+ * built from, so a state means the same colour here as there.
+ */
 export function summarizeCounts(counts: ClusterCounts | null | undefined, resource: string): CountSummary {
   const summary = counts?.[resource]?.summary || {};
   const out: CountSummary = {
@@ -239,20 +239,6 @@ export function totalCounts(getters: Getters, counts: ClusterCounts): CountSumma
   });
 }
 
-/**
- * A cluster's capacity, worked out as its dashboard works it out.
- *
- * The dashboard sums its SCHEDULABLE WORKER nodes - allocatable against what their pods request,
- * each node's own `pod-requests` annotation - and falls back to the cluster's `status` totals only
- * when it has none. "Used" is live usage from the metrics API over those same nodes, less what each
- * node keeps back for the system (capacity minus allocatable).
- *
- * Read from raw JSON, not node models: the Node model decides "worker" by looking up its management
- * node against the cluster that is OPEN, which is not this one. So that lookup is done here, against
- * this cluster's own management nodes, with the model's label fallback.
- *
- * Returns { pods, cores, memory, cpuUsed, ramUsed }; the last two are null without metrics.
- */
 /** One HardwareResourceGauge's numbers. */
 export interface Gauge {
   total: number;
@@ -278,6 +264,20 @@ interface RawNode {
   status?: { allocatable?: Record<string, string>; capacity?: Record<string, string> };
 }
 
+/**
+ * A cluster's capacity, worked out as its dashboard works it out.
+ *
+ * The dashboard sums its SCHEDULABLE WORKER nodes - allocatable against what their pods request,
+ * each node's own `pod-requests` annotation - and falls back to the cluster's `status` totals only
+ * when it has none. "Used" is live usage from the metrics API over those same nodes, less what each
+ * node keeps back for the system (capacity minus allocatable).
+ *
+ * Read from raw JSON, not node models: the Node model decides "worker" by looking up its management
+ * node against the cluster that is OPEN, which is not this one. So that lookup is done here, against
+ * this cluster's own management nodes, with the model's label fallback.
+ *
+ * Returns { pods, cores, memory, cpuUsed, ramUsed }; the last two are null without metrics.
+ */
 export async function fetchClusterCapacity(store: VuexStore, cluster: string): Promise<ClusterCapacity> {
   const req = (url: string) => store.dispatch('management/request', { url });
   const [mgmtCluster, nodesRes, mgmtNodesRes, metricsRes] = await Promise.all([

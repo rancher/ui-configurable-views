@@ -184,8 +184,10 @@ watch([readsData, typesFrom], async([reads, cluster]) => {
 
 const resourceOptions = computed(() => typeOptions(typeSchemas.value, draft.resource));
 
-// A picked entry is its type; one typed in is the text itself, which the select hands back as a
-// `{ label }` of its own making, with no value.
+/**
+ * A picked entry is its type; one typed in is the text itself, which the select hands back as a
+ * `{ label }` of its own making, with no value.
+ */
 const typeOf = (option: Partial<TypeOption> | string): string => (typeof option === 'string' ? option : option.value ?? option.label ?? '');
 
 // One link per line, "Label https://url" - the URL is whatever follows the last space.
@@ -226,7 +228,7 @@ function moveTab(index: number, delta: number): void {
   draft.tabs = tabs;
 }
 
-// A tab goes with what is in it; the button says so before it is pressed, and Cancel still undoes it.
+/** A tab goes with what is in it; the button says so before it is pressed, and Cancel still undoes it. */
 function removeTab(index: number): void {
   draft.tabs = (draft.tabs || []).filter((_, i) => i !== index);
 }
@@ -250,19 +252,19 @@ watch(needsClusters, (needed) => {
   }
 }, { immediate: true });
 
-// Escape closes it, like every other dialog in the product.
+/** Escape closes it, like every other dialog in the product. */
 function onKey(ev: KeyboardEvent): void {
   if (ev.key === 'Escape') {
     emit('cancel');
   }
 }
 
-// Place it knowing its real height (see `position`), and keep it on screen if the window moves.
+/** Place it knowing its real height (see `position`), and keep it on screen if the window moves. */
 function measure(): void {
   dialogHeight.value = dialog.value?.getBoundingClientRect().height || 0;
 }
 
-// With no scrim there is nothing to click "through" to, so a click anywhere outside closes it.
+/** With no scrim there is nothing to click "through" to, so a click anywhere outside closes it. */
 function onOutside(ev: MouseEvent): void {
   const target = ev.target as HTMLElement | null;
 

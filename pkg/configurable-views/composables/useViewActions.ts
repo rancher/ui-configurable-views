@@ -37,7 +37,7 @@ export function useViewActions(
     editing, activeViewId, pinnedView, saving, error, userId, scopes, orgIds, views,
   } = pageViews;
 
-  // Renamed in place on its tab.
+  /** Renamed in place on its tab. */
   async function renameStoredView(id: string, name: string): Promise<void> {
     const view = pageViews.viewById(id);
 
@@ -56,7 +56,7 @@ export function useViewActions(
     await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
   }
 
-  // The copy lands in front of you with its name open for typing, as a copied table view does.
+  /** The copy lands in front of you with its name open for typing, as a copied table view does. */
   async function duplicateView(id: string): Promise<void> {
     const source = pageViews.viewById(id);
 
@@ -82,7 +82,7 @@ export function useViewActions(
     bar.value?.openRename(copy.id);
   }
 
-  // Your default is the view the page opens on. Picking Rancher's own page is how to go back to none.
+  /** Your default is the view the page opens on. Picking Rancher's own page is how to go back to none. */
   async function setDefaultView(id: string): Promise<void> {
     const view = pageViews.viewById(id);
 
@@ -105,7 +105,7 @@ export function useViewActions(
     await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
   }
 
-  // The order the tabs were dragged into, by the key each view keeps its place by.
+  /** The order the tabs were dragged into, by the key each view keeps its place by. */
   async function reorderViews(ids: string[]): Promise<void> {
     const draft = pageViews.userDraft();
 
@@ -143,8 +143,10 @@ export function useViewActions(
     }
   }
 
-  // Publish the view to everyone. It joins the organization's scope, which is the only thing on this
-  // page that is not personal — so it asks first.
+  /**
+   * Publish the view to everyone. It joins the organization's scope, which is the only thing on this
+   * page that is not personal — so it asks first.
+   */
   async function publishView(id: string): Promise<void> {
     const source = editing.value && id === activeViewId.value ? pageViews.workingView() : pageViews.viewById(id);
 
@@ -184,13 +186,15 @@ export function useViewActions(
     }
   }
 
-  // Take a view back out of the organization scope. It is everyone's, so it asks first. Any personal
-  // fork of it stays, and simply stops being a fork: its `from` now points at nothing, which reads as
-  // a plain personal view.
-  //
-  // Whether this is ALLOWED is not decided here: publishing writes the same ConfigMap with no check of
-  // its own, so a check here would only be a suggestion. The write goes to the API and its RBAC
-  // answers — a user who may not remove it gets that back as the error below.
+  /**
+   * Take a view back out of the organization scope. It is everyone's, so it asks first. Any personal
+   * fork of it stays, and simply stops being a fork: its `from` now points at nothing, which reads as
+   * a plain personal view.
+   *
+   * Whether this is ALLOWED is not decided here: publishing writes the same ConfigMap with no check of
+   * its own, so a check here would only be a suggestion. The write goes to the API and its RBAC
+   * answers — a user who may not remove it gets that back as the error below.
+   */
   async function unpublishView(id: string): Promise<void> {
     const view = pageViews.viewById(id);
     const orgId = view?.org ? view.id : view?.from;

@@ -54,8 +54,10 @@ const frameUrl = computed(() => {
 // The etcd banner's three figures (EtcdInfoBanner reads them from the open cluster).
 const etcd = ref<{ leader: string; changes: string | number; failed: string | number } | null>(null);
 
-// The shell's queries ask the `cluster` store; for another cluster the same URL goes through the
-// management store, which reaches every cluster through Rancher's proxy.
+/**
+ * The shell's queries ask the `cluster` store; for another cluster the same URL goes through the
+ * management store, which reaches every cluster through Rancher's proxy.
+ */
 const viaManagement = (_action: string, opts: object) => store.dispatch('management/request', opts);
 
 async function loadEtcd(id: string, version: string): Promise<void> {

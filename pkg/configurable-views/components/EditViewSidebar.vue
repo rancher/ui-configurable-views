@@ -169,7 +169,7 @@ const widths = WIDTH_PRESETS;
 const heights = HEIGHT_PRESETS;
 const spacings = SPACING_PRESETS;
 
-// Searched as it reads: the translated name and description.
+/** Searched as it reads: the translated name and description. */
 const tileText = (entry: CatalogEntry) => `${ t(entry.labelKey) } ${ t(entry.descKey) }`;
 const blocks = computed(() => searchCatalog(BUILDING_BLOCKS, search.value, tileText));
 const readyMade = computed(() => searchCatalog(READY_MADE, search.value, tileText));

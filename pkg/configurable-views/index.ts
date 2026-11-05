@@ -35,7 +35,7 @@ const killSwitch: Action = {
   },
 };
 
-// Init the package
+/** Init the package */
 export default function(plugin: IPlugin): void {
   importTypes(plugin);
 

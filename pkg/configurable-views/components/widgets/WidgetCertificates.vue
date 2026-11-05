@@ -150,7 +150,7 @@ const warnings = computed(() => {
 
 const schema = computed(() => store.getters['management/schemaFor'](SECRET));
 
-// The certificate's secret, as a link into this widget's cluster: zero or one (see WidgetEvents).
+/** The certificate's secret, as a link into this widget's cluster: zero or one (see WidgetEvents). */
 function linkFor(row: Cert): RouteLocationRaw[] {
   const to = objectRoute(cluster.value, {
     kind: 'Secret', apiVersion: 'v1', name: row.metadata.name, namespace: row.metadata.namespace

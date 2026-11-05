@@ -92,8 +92,10 @@ function withoutDetailLink(header: TableColumn): TableColumn {
   return rest;
 }
 
-// The type's own columns, as its list page has them - and, for a list the server pages, the ones the
-// server can sort and filter by.
+/**
+ * The type's own columns, as its list page has them - and, for a list the server pages, the ones the
+ * server can sort and filter by.
+ */
 const headersFor = (paged: boolean): TableColumn[] => (schema.value ? (store.getters['type-map/headersFor'](schema.value, paged) || []).map(withoutDetailLink) : []);
 const headers = computed(() => headersFor(false));
 const pagedHeaders = computed(() => headersFor(true));

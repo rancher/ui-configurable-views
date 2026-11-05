@@ -37,8 +37,10 @@ function stopPolling(): void {
   }
 }
 
-// GrafanaDashboard's test: panels mean loaded; an error mark, or Grafana's own failure page, means it
-// did not.
+/**
+ * GrafanaDashboard's test: panels mean loaded; an error mark, or Grafana's own failure page, means it
+ * did not.
+ */
 function poll(): void {
   stopPolling();
   poller = setInterval(() => {
@@ -100,7 +102,7 @@ watch(() => props.url, () => {
   poll();
 });
 
-// The shell's own dressing for an embedded dashboard (GrafanaDashboard's injectCss).
+/** The shell's own dressing for an embedded dashboard (GrafanaDashboard's injectCss). */
 function onLoad(): void {
   const doc = frame.value?.contentWindow?.document;
 

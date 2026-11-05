@@ -50,7 +50,7 @@ function choose(id: string): void {
   chosenId.value = id;
 }
 
-// Arrow keys move between tabs, Home and End jump to the ends - the tablist pattern Tabbed follows.
+/** Arrow keys move between tabs, Home and End jump to the ends - the tablist pattern Tabbed follows. */
 function step(to: number | 'first' | 'last'): void {
   const list = tabs.value;
   const at = list.findIndex((t) => t.id === active.value?.id);

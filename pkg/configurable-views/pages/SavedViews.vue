@@ -84,7 +84,7 @@ onMounted(async() => {
   loaded.value = true;
 });
 
-// The scopes that have views for a page: the organization's, then yours.
+/** The scopes that have views for a page: the organization's, then yours. */
 function sectionsFor(page: PageKey): Section[] {
   const scopes = appliedViewScopes(store.getters, userId.value, page);
   const out: Section[] = [];
@@ -105,15 +105,17 @@ function sectionsFor(page: PageKey): Section[] {
 
 const isStock = (view: View) => isStockView(view);
 
-// What the catalog calls a building block, or its kind when the catalog has no such block.
+/** What the catalog calls a building block, or its kind when the catalog has no such block. */
 function blockTitle(kind: string): string {
   const key = blockLabelKey(kind);
 
   return key ? t(key) : kind;
 }
 
-// A view's widgets, in the order they sit on the grid - and after a Tabs widget, what is in each of
-// its tabs, labelled with the tab.
+/**
+ * A view's widgets, in the order they sit on the grid - and after a Tabs widget, what is in each of
+ * its tabs, labelled with the tab.
+ */
 function rowsFor(view: View) {
   if (isStockView(view)) {
     return [];

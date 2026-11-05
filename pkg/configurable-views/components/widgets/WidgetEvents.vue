@@ -83,9 +83,11 @@ const unsorted = (h: object) => ({ ...h, sort: false });
 
 const schema = computed(() => store.getters['management/schemaFor'](EVENT));
 
-// The dashboard's Count column, built as it builds it: from the event schema's own "Count" column,
-// which knows which of Steve's fields holds it. Every cluster's events share that schema. Left out,
-// rather than guessed, if a Rancher ever stops listing it.
+/**
+ * The dashboard's Count column, built as it builds it: from the event schema's own "Count" column,
+ * which knows which of Steve's fields holds it. Every cluster's events share that schema. Left out,
+ * rather than guessed, if a Rancher ever stops listing it.
+ */
 function countHeader() {
   try {
     // AGE is what it substitutes for an "age" column; Count is not one, so it only fills the slot.
@@ -109,8 +111,10 @@ const headers = computed(() => [
   ...countHeader(),
 ]);
 
-// The object an event is about, as a link into this widget's cluster: zero or one of them. A list,
-// because iterating it is how the template binds a link that may not exist without asserting it does.
+/**
+ * The object an event is about, as a link into this widget's cluster: zero or one of them. A list,
+ * because iterating it is how the template binds a link that may not exist without asserting it does.
+ */
 function linkFor(row: { involvedObject?: Record<string, string> }): RouteLocationRaw[] {
   const to = objectRoute(cluster.value, row.involvedObject);
 

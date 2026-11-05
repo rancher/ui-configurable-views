@@ -31,8 +31,10 @@ export function useSharedTypeList(key: () => string | null): Ref<number> {
     }
   }
 
-  // The leaving table forgets the type as it unmounts, which has happened by the time this runs:
-  // the others are rebuilt after it, not before.
+  /**
+   * The leaving table forgets the type as it unmounts, which has happened by the time this runs:
+   * the others are rebuilt after it, not before.
+   */
   function leave(k: string | null): void {
     const set = k ? showing.get(k) : undefined;
 

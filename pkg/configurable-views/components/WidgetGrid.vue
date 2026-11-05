@@ -181,7 +181,7 @@ function columnAt(x: number, f: Frame): number {
   return Math.max(0, Math.min(GRID_COLUMNS - span, Math.round((x - grab - f.left) / f.pitch)));
 }
 
-// The first widget from line `from` on that is not the one being moved - what a new line is opened above.
+/** The first widget from line `from` on that is not the one being moved - what a new line is opened above. */
 function anchorFrom(lines: LineBox[], from: number): string | null {
   for (let i = from; i < lines.length; i++) {
     const id = lines[i].ids.find((x) => x !== viewEditor.ui.dragId);
@@ -396,8 +396,10 @@ function scroller(): HTMLElement | null {
   return null;
 }
 
-// How fast to scroll for a pointer at `y`: 0 outside the edge zones, ramping to MAX_SPEED at the
-// very edge, negative for up.
+/**
+ * How fast to scroll for a pointer at `y`: 0 outside the edge zones, ramping to MAX_SPEED at the
+ * very edge, negative for up.
+ */
 function edgeSpeed(y: number): number {
   const el = scroller();
   const top = el ? el.getBoundingClientRect().top : 0;
@@ -517,8 +519,10 @@ function onDropAtEnd(ev: DragEvent): void {
   viewEditor.dropAt(t, props.place);
 }
 
-// A drag that ends anywhere — including outside the grid, or cancelled with Escape — must stop the
-// page scrolling and put the preview away. dragend fires on the source, so it is listened for globally.
+/**
+ * A drag that ends anywhere — including outside the grid, or cancelled with Escape — must stop the
+ * page scrolling and put the preview away. dragend fires on the source, so it is listened for globally.
+ */
 function onDragFinished(): void {
   stopScrolling();
   clearPreview();

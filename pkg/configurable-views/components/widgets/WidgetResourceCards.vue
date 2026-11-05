@@ -43,7 +43,7 @@ watch(cluster, async(id) => {
   }
 }, { immediate: true });
 
-// A card for one type, linking to that type's list in the widget's cluster.
+/** A card for one type, linking to that type's list in the widget's cluster. */
 function card(resource: string) {
   const summary = summarizeCounts(counts.value, resource);
 
