@@ -1,4 +1,4 @@
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import {
   appliedViewScopes, getPageConfig, isTemplatingEnabled, saveView, toggleTemplating, viewsOffInUrl
 } from '@pkg/configurable-views/templating/template-engine';
@@ -38,7 +38,7 @@ function storeWith(...maps: FakeConfigMap[]) {
   });
 
   return {
-    store: { getters, dispatch } as unknown as Store<unknown>, created, dispatch
+    store: { getters, dispatch } as unknown as VuexStore, created, dispatch
   };
 }
 

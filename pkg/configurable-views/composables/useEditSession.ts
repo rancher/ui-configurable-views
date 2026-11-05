@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
 import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
 import { DEFAULT_GAP, newId, newLayoutView, isStockView } from '../templating/view-model';
@@ -21,7 +21,7 @@ const STOCK_START = 'stock-page';
 export function useEditSession(
   vs: ViewSetState,
   props: { page: PageKey; title: string; firstViewName: string },
-  store: Store<unknown>,
+  store: VuexStore,
   t: I18n['t'],
   confirm: (options: ConfirmOptions) => Promise<boolean>,
 ) {

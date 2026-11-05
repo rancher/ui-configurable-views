@@ -1,11 +1,15 @@
 // The types a Table widget can show, from the schemas of wherever it reads: Rancher's own API, or one
 // cluster's. Pure functions - no Vue, no store.
 
-/** A schema as Steve serves it - the parts the Resource picker reads. */
-export interface TypeSchema {
-  id: string;
+import type { Schema, SchemaAttribute } from '@shell/plugins/steve/schema';
+
+/**
+ * A schema as Steve serves it: the shell's type, with what the Resource picker reads that it does not
+ * declare yet. Read raw from a cluster, so a type may come without its attributes.
+ */
+export interface TypeSchema extends Omit<Schema, 'attributes'> {
   collectionMethods?: string[];
-  attributes?: {
+  attributes?: Partial<Omit<SchemaAttribute, 'verbs'>> & {
     kind?: string;
     group?: string;
     verbs?: string[];

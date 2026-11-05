@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, type Ref } from 'vue';
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
 import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
 import {
@@ -27,7 +27,7 @@ const UNDO_TIMEOUT = 10000;
 export function useViewActions(
   vs: ViewSetState,
   props: { page: PageKey; title: string },
-  store: Store<unknown>,
+  store: VuexStore,
   t: I18n['t'],
   confirm: (options: ConfirmOptions) => Promise<boolean>,
   bar: Ref<BarControls | null>,

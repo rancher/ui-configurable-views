@@ -269,10 +269,6 @@ export function searchCatalog(list: CatalogEntry[], query: string, textOf: (entr
 }
 
 /**
- * The resources offered in a widget's "Resource" picker. Any type Rancher knows can be typed in,
- * but these are the ones worth suggesting.
- */
-/**
  * The context a table widget pages under: the Home's own.
  *
  * Server-side pagination is enabled per type per context, and the shell enables the cluster types

@@ -20,9 +20,6 @@
 // what it gets: a view round-trips through a ConfigMap anyone with access can edit by hand.
 
 import {
-  EVENT, INGRESS, LONGHORN, NODE, POD, PVC, SERVICE, WORKLOAD_TYPES
-} from '@shell/config/types';
-import {
   NODE_WIDGET, type LayoutView, type View, type Sides, type StockView, type ViewSet, type WidgetKind,
   type WidgetNode, type WidgetPlace, type WidgetSpec, type WidgetTab, type MetricsDashboard
 } from './types';
@@ -31,15 +28,6 @@ export { NODE_WIDGET };
 
 /** The widget that shows rows of a type. */
 const TABLE_KIND = 'table';
-
-/**
- * The types a Table always read from a cluster before it could say where it reads from. A table saved
- * then, with one of these, reads a cluster still.
- */
-const READ_FROM_A_CLUSTER: string[] = [
-  EVENT, POD, WORKLOAD_TYPES.DEPLOYMENT, WORKLOAD_TYPES.DAEMON_SET, WORKLOAD_TYPES.STATEFUL_SET, WORKLOAD_TYPES.JOB,
-  WORKLOAD_TYPES.CRON_JOB, NODE, SERVICE, INGRESS, PVC, LONGHORN.VOLUMES,
-];
 
 /** The widget that holds other widgets, in tabs. */
 const TABS_KIND = 'tabs';
@@ -300,7 +288,7 @@ export function normalizeWidget(widget: unknown): WidgetSpec {
     out.ownViews = true;
   }
   if (out.kind === TABLE_KIND) {
-    out.fromCluster = typeof w.fromCluster === 'boolean' ? w.fromCluster : READ_FROM_A_CLUSTER.includes(out.resource);
+    out.fromCluster = w.fromCluster === true;
   }
 
   // `subtitle` and `image` are banner-only extras; keep them only when set so stored specs stay small.

@@ -1,6 +1,6 @@
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  expectedAgents, fetchAlerts, fetchMonitoring, fetchStateSummaries, objectRoute, summarizeCounts
+  expectedAgents, fetchAlerts, fetchClusterPage, fetchClusterRows, fetchClusterSchemas, fetchMonitoring, fetchStateSummaries, objectRoute, summarizeCounts
 } from '@pkg/configurable-views/templating/widget-data';
 
 // A store whose management/request answers by the PATH asked for (query aside): a value, or an
@@ -13,8 +13,59 @@ function storeAnswering(answers: Record<string, unknown>) {
     return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
   });
 
-  return { store: { dispatch } as unknown as Store<unknown>, dispatch };
+  return { store: { dispatch } as unknown as VuexStore, dispatch };
 }
+
+describe('reading a type from one cluster', () => {
+  // A store whose findPage answers with these rows, out of this many.
+  function storeWithPage(rows: object[], count = rows.length) {
+    const dispatch = jest.fn().mockResolvedValue({ data: rows, pagination: { result: { count } } });
+
+    return { store: { dispatch } as unknown as VuexStore, dispatch };
+  }
+
+  it('asks the named cluster for one page', async() => {
+    const { store, dispatch } = storeWithPage([{ id: 'a' }], 30);
+    const page = await fetchClusterPage(store, {
+      resource: 'pod', cluster: 'c/1', page: 2, pageSize: 5
+    });
+
+    expect(dispatch).toHaveBeenCalledWith('management/findPage', {
+      type: 'pod',
+      opt:  {
+        url:        '/k8s/clusters/c%2F1/v1/pod',
+        transient:  true,
+        watch:      false,
+        pagination: {
+          page: 2, pageSize: 5, sort: [], filters: []
+        },
+      },
+    });
+    expect(page).toStrictEqual({
+      rows: [{ id: 'a' }], count: 30, truncated: false, serverPaged: true
+    });
+  });
+
+  it('reads every row up to the cap, filtered, and says when the cluster had more', async() => {
+    const { store, dispatch } = storeWithPage([{ id: 'a' }, { id: 'b' }], 3);
+    const filters = [{ fields: [] }] as unknown as Parameters<typeof fetchClusterRows>[1]['filters'];
+
+    await expect(fetchClusterRows(store, {
+      resource: 'secret', cluster: 'c-1', filters, cap: 2
+    })).resolves.toStrictEqual({ rows: [{ id: 'a' }, { id: 'b' }], truncated: true });
+
+    expect(dispatch.mock.calls[0][1].opt.pagination).toStrictEqual({
+      page: 1, pageSize: 2, sort: [], filters
+    });
+  });
+
+  it('reads a cluster\'s own schemas from that cluster', async() => {
+    const { store, dispatch } = storeAnswering({ '/k8s/clusters/c-1/v1/schemas': { data: [{ id: 'pod' }] } });
+
+    await expect(fetchClusterSchemas(store, 'c-1')).resolves.toStrictEqual([{ id: 'pod' }]);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('cluster counts', () => {
   it('splits a type into useful, warning and error by state', () => {

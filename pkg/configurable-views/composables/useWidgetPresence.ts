@@ -1,7 +1,8 @@
 import {
   getCurrentInstance, reactive, type Component, type ComponentOptionsMixin, type CSSProperties
 } from 'vue';
-import { useStore, type Store } from 'vuex';
+import { useStore } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import { useRoute, useRouter, type Router } from 'vue-router';
 import { ExtensionPoint, CardLocation } from '@shell/core/types';
 import { getApplicableExtensionEnhancements } from '@shell/core/plugin-helpers';
@@ -49,7 +50,7 @@ const MONITORING_TTL_MS = 60000;
 const monitoring = reactive<Record<string, { installed: boolean; at: number }>>({});
 const asking = new Set<string>();
 
-function hasMonitoring(store: Store<unknown>, cluster: string): boolean | undefined {
+function hasMonitoring(store: VuexStore, cluster: string): boolean | undefined {
   const known = monitoring[cluster];
 
   if ((!known || Date.now() - known.at > MONITORING_TTL_MS) && !asking.has(cluster)) {

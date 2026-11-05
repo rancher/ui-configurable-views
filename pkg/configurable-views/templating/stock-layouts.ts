@@ -12,7 +12,7 @@ import {
   WIDGET_BANNER, WIDGET_CLUSTER_TABLE, WIDGET_LINKS, WIDGET_CLUSTER_HEADER, WIDGET_RESOURCE_CARDS, WIDGET_EXTENSION_CARDS,
   WIDGET_CAPACITY, WIDGET_COMPONENT_STATUS, WIDGET_EVENTS, WIDGET_ALERTS, WIDGET_CERTIFICATES, WIDGET_METRICS, WIDGET_TABS
 } from './widget-catalog';
-import type { PageKey } from './template-engine';
+import { PAGE_HOME, type PageKey } from './template-engine';
 import type { WidgetNode, WidgetSpec } from './types';
 
 /** Translates a key - the shell's `t`. */
@@ -37,7 +37,7 @@ const TAB_PANEL = {
  *                      above it (see `above`)
  */
 export function stockView(page: PageKey): { gap: number; pad: number } {
-  return page === 'home' ? { gap: 22.5, pad: 72 } : { gap: 0, pad: 24 };
+  return page === PAGE_HOME ? { gap: 22.5, pad: 72 } : { gap: 0, pad: 24 };
 }
 
 interface PartOptions {
@@ -83,7 +83,7 @@ function tabs(t: Translate, entries: [labelKey: string, spec: Partial<WidgetSpec
  * like the dashboard, the view leaves them out wherever a cluster does not have them.
  */
 export function stockWidgets(page: PageKey, t: Translate): WidgetNode[] {
-  if (page === 'home') {
+  if (page === PAGE_HOME) {
     const { gap, pad } = stockView(page);
 
     // The banner runs edge to edge over the view's inset, as the Home's does; the panel below it

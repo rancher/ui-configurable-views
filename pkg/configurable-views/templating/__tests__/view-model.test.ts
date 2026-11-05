@@ -141,15 +141,14 @@ describe('normalizeWidget', () => {
     expect('viewTabs' in normalizeWidget({ kind: 'table', viewTabs: false })).toBe(false);
   });
 
-  it('says where a table reads from, and reads a table saved before it could say so from where it did then', () => {
+  it('says where a table reads from, Rancher unless it was told otherwise', () => {
     expect(normalizeWidget({
       kind: 'table', resource: 'pod', fromCluster: false
     }).fromCluster).toBe(false);
     expect(normalizeWidget({
       kind: 'table', resource: 'management.cattle.io.cluster', fromCluster: true
     }).fromCluster).toBe(true);
-    expect(normalizeWidget({ kind: 'table', resource: 'pod' }).fromCluster).toBe(true);
-    expect(normalizeWidget({ kind: 'table', resource: 'apps.deployment' }).fromCluster).toBe(true);
+    expect(normalizeWidget({ kind: 'table', resource: 'pod' }).fromCluster).toBe(false);
     expect(normalizeWidget({ kind: 'table', resource: 'management.cattle.io.cluster' }).fromCluster).toBe(false);
     expect('fromCluster' in normalizeWidget({ kind: 'links' })).toBe(false);
   });

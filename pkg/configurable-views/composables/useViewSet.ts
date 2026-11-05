@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue';
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import { useRoute } from 'vue-router';
 import type { I18n } from '@shell/composables/useI18n';
 import {
@@ -39,7 +39,7 @@ export function viewContent(view: View): string {
  * organization's scope and appear in the same bar. Editing one of those does not change what everyone
  * else sees: it forks the view into your account first.
  */
-export function useViewSet(props: { page: PageKey }, store: Store<unknown>, t: I18n['t']) {
+export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['t']) {
   // ---- state ----
 
   const userId = ref<string | null>(null);

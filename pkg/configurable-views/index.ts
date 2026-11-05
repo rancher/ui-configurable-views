@@ -1,10 +1,9 @@
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import { importTypes } from '@rancher/auto-import';
 import { ActionLocation, IPlugin, type Action } from '@shell/core/types';
 import type { ShellApi } from '@shell/apis';
 import { NotificationLevel } from '@shell/types/notifications';
 import { fetchTemplatingConfigMaps, toggleTemplating } from './templating/template-engine';
-import routing from './routing/index';
 import { product, pages } from './product';
 import Home from './pages/Home.vue';
 import ClusterDashboard from './pages/ClusterDashboard.vue';
@@ -12,7 +11,7 @@ import { toggleViewBar, viewBarLocked, viewBarVisible } from './composables/useV
 
 /** What a header action runs with as `this`: the header, with the store and the shell API on it. */
 interface HeaderContext {
-  $store: Store<unknown>;
+  $store: VuexStore;
   $shell: ShellApi;
 }
 
@@ -43,7 +42,6 @@ export default function(plugin: IPlugin): void {
   plugin.metadata = require('./package.json');
 
   plugin.addProduct(product, pages);
-  plugin.addRoutes(routing);
 
   plugin.addNavHooks({ onEnter: (store) => fetchTemplatingConfigMaps(store) });
 

@@ -6,7 +6,7 @@
 //
 // Pure functions — no Vue. `rows` are Steve/Norman resource instances.
 
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { parseSi, createMemoryValues } from '@shell/utils/units';
 import { PaginationParamFilter } from '@shell/types/store/pagination.types';
@@ -18,7 +18,7 @@ import { RESOURCES as DASHBOARD_RESOURCES } from '@shell/pages/c/_cluster/explor
 import type { MetricsDashboard, ResourceRow } from './types';
 import type { TypeSchema } from './resource-types';
 
-type Getters = Store<unknown>['getters'];
+type Getters = VuexStore['getters'];
 
 /** One way a Steve list can be sorted. */
 export interface SteveSort {
@@ -59,12 +59,16 @@ export function clusterOptions(getters: Getters): { id: string; label: string }[
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function clusterUrl(cluster: string, path: string): string {
+  return `/k8s/clusters/${ encodeURIComponent(cluster) }/v1/${ path }`;
+}
+
 /**
  * The schemas of one cluster's own API - every type it serves, for the Resource picker, and the
  * schema of a type that only that cluster has. Read, not loaded: nothing goes into a store.
  */
-export async function fetchClusterSchemas(store: Store<unknown>, cluster: string): Promise<TypeSchema[]> {
-  const res = await store.dispatch('management/request', { url: `/k8s/clusters/${ encodeURIComponent(cluster) }/v1/schemas` });
+export async function fetchClusterSchemas(store: VuexStore, cluster: string): Promise<TypeSchema[]> {
+  const res = await store.dispatch('management/request', { url: clusterUrl(cluster, 'schemas') });
 
   return res?.data || [];
 }
@@ -88,6 +92,7 @@ export interface ClusterPageArgs {
   pageSize?: number;
   /** A fixed order, as Steve fields. */
   sort?: SteveSort[];
+  filters?: PaginationParamFilter[];
   /** Read up to `cap` rows at once instead of a page. */
   whole?: boolean;
   cap?: number;
@@ -100,8 +105,8 @@ export interface ClusterPage {
   serverPaged: boolean;
 }
 
-export async function fetchClusterPage(store: Store<unknown>, {
-  resource, cluster, page = 1, pageSize = 10, sort = [], whole = false, cap = 500
+export async function fetchClusterPage(store: VuexStore, {
+  resource, cluster, page = 1, pageSize = 10, sort = [], filters = [], whole = false, cap = 500
 }: ClusterPageArgs): Promise<ClusterPage> {
   if (!resource || !cluster) {
     return {
@@ -112,13 +117,11 @@ export async function fetchClusterPage(store: Store<unknown>, {
   const res = await store.dispatch('management/findPage', {
     type: resource,
     opt:  {
-      url:        `/k8s/clusters/${ encodeURIComponent(cluster) }/v1/${ resource }`,
+      url:        clusterUrl(cluster, resource),
       transient:  true,
       watch:      false,
-      pagination: whole ? {
-        page: 1, pageSize: cap, sort
-      } : {
-        page, pageSize, sort, filters: []
+      pagination: {
+        page: whole ? 1 : page, pageSize: whole ? cap : pageSize, sort, filters
       },
     },
   });
@@ -143,7 +146,7 @@ export async function fetchClusterPage(store: Store<unknown>, {
 // Nothing is loaded, and two widgets can show two clusters side by side.
 
 /** The management cluster behind a cluster id: name, state, provider, version, capacity. */
-export function fetchManagementCluster<T = ResourceRow>(store: Store<unknown>, cluster: string): Promise<T> {
+export function fetchManagementCluster<T = ResourceRow>(store: VuexStore, cluster: string): Promise<T> {
   return store.dispatch('management/find', { type: MANAGEMENT.CLUSTER, id: cluster });
 }
 
@@ -170,14 +173,10 @@ function once<T>(key: string, load: () => Promise<T>): Promise<T> {
   return promise;
 }
 
-function clusterUrl(cluster: string, path: string): string {
-  return `/k8s/clusters/${ encodeURIComponent(cluster) }/v1/${ path }`;
-}
-
 /** A cluster's counts: `{ <type>: { summary: { count, states } } }`, as Steve returns them. */
 export type ClusterCounts = Record<string, { summary?: { count?: number; states?: Record<string, number> } }>;
 
-export function fetchClusterCounts(store: Store<unknown>, cluster: string): Promise<ClusterCounts> {
+export function fetchClusterCounts(store: VuexStore, cluster: string): Promise<ClusterCounts> {
   return once(`counts|${ cluster }`, async() => {
     const res = await store.dispatch('management/request', { url: clusterUrl(cluster, 'counts') });
 
@@ -279,7 +278,7 @@ interface RawNode {
   status?: { allocatable?: Record<string, string>; capacity?: Record<string, string> };
 }
 
-export async function fetchClusterCapacity(store: Store<unknown>, cluster: string): Promise<ClusterCapacity> {
+export async function fetchClusterCapacity(store: VuexStore, cluster: string): Promise<ClusterCapacity> {
   const req = (url: string) => store.dispatch('management/request', { url });
   const [mgmtCluster, nodesRes, mgmtNodesRes, metricsRes] = await Promise.all([
     fetchManagementCluster(store, cluster),
@@ -356,23 +355,14 @@ export async function fetchClusterCapacity(store: Store<unknown>, cluster: strin
  * dashboard's own Certificates list does exactly this, and says why. `truncated` says when the cap
  * cut the list short, so the sort is never quietly over a sample.
  */
-export async function fetchClusterRows<T = ResourceRow>(store: Store<unknown>, {
+export async function fetchClusterRows<T = ResourceRow>(store: VuexStore, {
   resource, cluster, filters, cap = 500
 }: { resource: string; cluster: string; filters?: PaginationParamFilter[]; cap?: number }): Promise<{ rows: T[]; truncated: boolean }> {
-  const res = await store.dispatch('management/findPage', {
-    type: resource,
-    opt:  {
-      url:        clusterUrl(cluster, resource),
-      transient:  true,
-      watch:      false,
-      pagination: {
-        page: 1, pageSize: cap, sort: [], filters: filters || []
-      },
-    },
+  const { rows, truncated } = await fetchClusterPage(store, {
+    resource, cluster, filters, cap, whole: true
   });
-  const count = res?.pagination?.result?.count ?? res?.data?.length ?? 0;
 
-  return { rows: res?.data || [], truncated: count > cap };
+  return { rows: rows as T[], truncated };
 }
 
 /** One type's state summary in one cluster: counts per state, and per namespace within each. */
@@ -390,7 +380,7 @@ export interface StateSummary {
  * one per type. A type this user cannot list, or that the cluster does not serve, comes back as an
  * error for that type alone, which the overview leaves out exactly as it leaves out its own.
  */
-export function fetchStateSummaries(store: Store<unknown>, cluster: string, types: string[]): Promise<StateSummary[]> {
+export function fetchStateSummaries(store: VuexStore, cluster: string, types: string[]): Promise<StateSummary[]> {
   return Promise.all(types.map(async(type): Promise<StateSummary> => {
     try {
       const res = await store.dispatch('management/request', { url: `${ clusterUrl(cluster, type) }?summary=metadata.state.name&summaryonly&summarynamespaced` });
@@ -437,7 +427,7 @@ export const METRICS_DASHBOARDS: Record<MetricsDashboard, { labelKey: string; de
 };
 
 /** Whether a cluster has Rancher's monitoring, and which version - the version decides the Grafana URL's prefix. */
-export async function fetchMonitoring(store: Store<unknown>, cluster: string): Promise<{ installed: boolean; version: string }> {
+export async function fetchMonitoring(store: VuexStore, cluster: string): Promise<{ installed: boolean; version: string }> {
   for (const name of ['rancher-monitoring-dashboards', 'rancher-monitoring']) {
     try {
       const app = await store.dispatch('management/request', { url: clusterUrl(cluster, `catalog.cattle.io.apps/${ MONITORING_NS }/${ name }`), redirectUnauthorized: false });
@@ -459,7 +449,7 @@ export interface Alert {
 }
 
 /** A cluster's firing alerts, from its Alertmanager (v2, else v1), through Rancher's proxy to that cluster. */
-export async function fetchAlerts(store: Store<unknown>, cluster: string): Promise<Alert[]> {
+export async function fetchAlerts(store: VuexStore, cluster: string): Promise<Alert[]> {
   const base = `/k8s/clusters/${ encodeURIComponent(cluster) }/api/v1/namespaces/${ MONITORING_NS }/services/http:rancher-monitoring-alertmanager:9093/proxy/api`;
 
   try {
@@ -529,7 +519,7 @@ interface RawDeployment {
  * dashboard hides the chip then. 'unreachable' when the cluster itself did not answer, which is
  * what the dashboard means by a disconnected agent.
  */
-async function readDeployment(store: Store<unknown>, cluster: string, id: string): Promise<RawDeployment | null | 'unreachable'> {
+async function readDeployment(store: VuexStore, cluster: string, id: string): Promise<RawDeployment | null | 'unreachable'> {
   try {
     return await store.dispatch('management/request', { url: clusterUrl(cluster, `apps.deployments/${ id }`) });
   } catch (e) {
@@ -586,7 +576,7 @@ function agentStatus(name: string, cluster: string, resources: (RawDeployment | 
  * status on its management cluster. Any condition that is not True makes a component unhealthy; a
  * component the status does not mention counts as healthy, as the dashboard counts it.
  */
-export async function fetchComponentHealth(store: Store<unknown>, cluster: string): Promise<ServiceStatus[]> {
+export async function fetchComponentHealth(store: VuexStore, cluster: string): Promise<ServiceStatus[]> {
   const mgmt = await fetchManagementCluster<{ status?: { componentStatuses?: { name: string; conditions?: { status?: string; message?: string }[] }[] } }>(store, cluster);
 
   return CLUSTER_COMPONENTS.map((name) => {
@@ -618,7 +608,7 @@ export function expectedAgents(cluster: string): ('cattle' | 'fleet')[] {
  * local cluster Fleet is the agent AND the controller; the controller alone decides while the agent
  * is still being created, as it can be for a while after Rancher starts.
  */
-export async function fetchAgentHealth(store: Store<unknown>, cluster: string, agent: 'cattle' | 'fleet'): Promise<ServiceStatus | null> {
+export async function fetchAgentHealth(store: VuexStore, cluster: string, agent: 'cattle' | 'fleet'): Promise<ServiceStatus | null> {
   if (agent === 'cattle') {
     return agentStatus('cattle', cluster, [await readDeployment(store, cluster, 'cattle-system/cattle-cluster-agent')]);
   }

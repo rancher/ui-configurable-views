@@ -9,7 +9,7 @@ import Tab from '@shell/components/Tabbed/Tab.vue';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
 import { MANAGEMENT } from '@shell/config/types';
 import {
-  appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, type PageConfig, type PageKey
+  appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig, type PageKey
 } from '../templating/template-engine';
 import { cssSize, isStockView, normalizeSides } from '../templating/view-model';
 import { blockLabelKey } from '../templating/widget-catalog';
@@ -66,10 +66,10 @@ const openCluster = computed<string>(() => {
 
 const pages = computed<PageEntry[]>(() => [
   {
-    key: 'home', label: t('nav.home'), to: { name: 'home' }
+    key: PAGE_HOME, label: t('nav.home'), to: { name: 'home' }
   },
   {
-    key:   'clusterDashboard',
+    key:   PAGE_CLUSTER_DASHBOARD,
     label: t('clusterIndexPage.header'),
     to:    openCluster.value ? { name: 'c-cluster-explorer', params: { cluster: openCluster.value } } : null,
   },

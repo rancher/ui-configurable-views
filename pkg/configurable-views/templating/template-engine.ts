@@ -12,13 +12,13 @@
 // `default` are a prototype's storage: per-user state belongs in a user preference and the published
 // view in a Setting, which is an open question on the pull request.
 
-import type { Store } from 'vuex';
+import type { VuexStore } from '@shell/types/store/vuex';
+import { CONFIG_MAP } from '@shell/config/types';
 import { migrateViewSet } from './view-model';
 import type { ViewSet } from './types';
 
-type Getters = Store<unknown>['getters'];
+type Getters = VuexStore['getters'];
 
-const CONFIGMAP = 'configmap';
 const NAMESPACE = 'default';
 
 // Every stored ConfigMap carries the marker; the type label tells them apart.
@@ -33,17 +33,18 @@ const HOME_CONFIG_NAME = 'templating-home';
 
 const configLabels = { [LABEL_MARKER]: 'true', [LABEL_TYPE]: TYPE_CONFIG };
 
-/** A page that can be configured, and the key its views are stored under in templating-home. */
-export type PageKey = 'home' | 'clusterDashboard';
+// The pages that can be configured, by the key their views are stored under in templating-home.
+export const PAGE_HOME = 'home';
+export const PAGE_CLUSTER_DASHBOARD = 'clusterDashboard';
 
-// This package's product, its pages, and the routes the Product API makes for them - kept here so
-// product.ts and routing/index.ts agree. The name has no dashes: the API takes them out of a
+/** A page that can be configured. */
+export type PageKey = typeof PAGE_HOME | typeof PAGE_CLUSTER_DASHBOARD;
+
+// This package's product and its pages. The name has no dashes: the Product API takes them out of a
 // product's name, so its routes do not read as nested route names.
 export const PRODUCT_NAME = 'configurableviews';
 export const PAGE_SETTINGS = 'settings';
 export const PAGE_VIEWS = 'views';
-export const ROUTE_SETTINGS = `${ PRODUCT_NAME }-c-cluster-${ PAGE_SETTINGS }`;
-export const ROUTE_VIEWS = `${ PRODUCT_NAME }-c-cluster-${ PAGE_VIEWS }`;
 
 /** A ConfigMap as the management store hands it back: its fields, and `save`. */
 interface ConfigMapModel {
@@ -86,8 +87,8 @@ function parse(json: string | undefined): PageConfig {
 }
 
 function cmNamed(getters: Getters, name: string): ConfigMapModel | undefined {
-  return getters['management/byId']?.(CONFIGMAP, `${ NAMESPACE }/${ name }`) ||
-    (getters['management/all']?.(CONFIGMAP) || []).find((cm: ConfigMapModel) => cm.metadata?.name === name && cm.metadata?.labels?.[LABEL_MARKER] === 'true');
+  return getters['management/byId']?.(CONFIG_MAP, `${ NAMESPACE }/${ name }`) ||
+    (getters['management/all']?.(CONFIG_MAP) || []).find((cm: ConfigMapModel) => cm.metadata?.name === name && cm.metadata?.labels?.[LABEL_MARKER] === 'true');
 }
 
 /**
@@ -99,13 +100,13 @@ function cmNamed(getters: Getters, name: string): ConfigMapModel | undefined {
  *
  * Never rejects: a failed read leaves the store as it was, and the Home shows what it last had.
  */
-export async function fetchTemplatingConfigMaps(store: Store<unknown>): Promise<void> {
-  if (!store.getters['management/schemaFor'](CONFIGMAP)) {
+export async function fetchTemplatingConfigMaps(store: VuexStore): Promise<void> {
+  if (!store.getters['management/schemaFor'](CONFIG_MAP)) {
     return;
   }
 
   await store.dispatch('management/findLabelSelector', {
-    type:     CONFIGMAP,
+    type:     CONFIG_MAP,
     matching: { namespace: NAMESPACE, labelSelector: { matchLabels: { [LABEL_MARKER]: 'true' } } },
     opt:      { force: true },
   }).catch(() => undefined);
@@ -119,11 +120,11 @@ function pageConfig(getters: Getters, page: PageKey): PageConfig {
   }
 
   // The Home used to live in the kill-switch ConfigMap. Still read there until the next save moves it.
-  return page === 'home' ? parse(cmNamed(getters, CONFIG_NAME)?.data?.home) : {};
+  return page === PAGE_HOME ? parse(cmNamed(getters, CONFIG_NAME)?.data?.[PAGE_HOME]) : {};
 }
 
 /** A page's raw stored config ({ global, users }) - for the Configurable Views page's YAML editor. */
-export function getPageConfig(getters: Getters, page: PageKey = 'home'): PageConfig {
+export function getPageConfig(getters: Getters, page: PageKey = PAGE_HOME): PageConfig {
   return pageConfig(getters, page);
 }
 
@@ -132,7 +133,7 @@ export function getPageConfig(getters: Getters, page: PageKey = 'home'): PageCon
  * organization's, and a disabled view is skipped so the scope beneath it shows. Old stored shapes
  * are migrated on read (see migrateViewSet).
  */
-export function appliedViewScopes(getters: Getters, userId?: string | null, page: PageKey = 'home'): ViewScopes {
+export function appliedViewScopes(getters: Getters, userId?: string | null, page: PageKey = PAGE_HOME): ViewScopes {
   const home = pageConfig(getters, page);
   const rawGlobal = home.global || null;
   const rawUser = (userId && home.users?.[userId]) || null;
@@ -173,7 +174,7 @@ export function viewsOffInUrl(query: Record<string, unknown> | null | undefined)
 }
 
 /** Set the kill switch - or flip it, with no argument. Resolves to the new state. */
-export async function toggleTemplating(store: Store<unknown>, enabled?: boolean): Promise<boolean> {
+export async function toggleTemplating(store: VuexStore, enabled?: boolean): Promise<boolean> {
   const desired = typeof enabled === 'boolean' ? enabled : !isTemplatingEnabled(store.getters);
   const existing = cmNamed(store.getters, CONFIG_NAME);
 
@@ -182,7 +183,7 @@ export async function toggleTemplating(store: Store<unknown>, enabled?: boolean)
     await existing.save();
   } else {
     const cm: ConfigMapModel = await store.dispatch('management/create', {
-      type:     CONFIGMAP,
+      type:     CONFIG_MAP,
       metadata: {
         name: CONFIG_NAME, namespace: NAMESPACE, labels: configLabels
       },
@@ -202,7 +203,7 @@ export async function toggleTemplating(store: Store<unknown>, enabled?: boolean)
  * own key, and the other pages' keys are written back as they were; nothing here touches the kill
  * switch, which is a different ConfigMap.
  */
-async function persistPage(store: Store<unknown>, page: PageKey, config: PageConfig): Promise<void> {
+async function persistPage(store: VuexStore, page: PageKey, config: PageConfig): Promise<void> {
   const existing = cmNamed(store.getters, HOME_CONFIG_NAME);
 
   if (existing && existing.metadata.labels?.[LABEL_TYPE] === TYPE_CONFIG) {
@@ -210,7 +211,7 @@ async function persistPage(store: Store<unknown>, page: PageKey, config: PageCon
     await existing.save();
   } else {
     const cm: ConfigMapModel = await store.dispatch('management/create', {
-      type:     CONFIGMAP,
+      type:     CONFIG_MAP,
       metadata: {
         name: HOME_CONFIG_NAME, namespace: NAMESPACE, labels: configLabels
       },
@@ -222,12 +223,12 @@ async function persistPage(store: Store<unknown>, page: PageKey, config: PageCon
 }
 
 /** Write a page's raw stored config - from the Configurable Views page's YAML editor. */
-export async function savePageConfig(store: Store<unknown>, config: PageConfig | null, page: PageKey = 'home'): Promise<void> {
+export async function savePageConfig(store: VuexStore, config: PageConfig | null, page: PageKey = PAGE_HOME): Promise<void> {
   await persistPage(store, page, config || {});
 }
 
 /** Save one scope's view of a page. `null` clears that scope. */
-export async function saveView(store: Store<unknown>, scope: 'global' | 'user', view: ViewSet | null, userId?: string | null, page: PageKey = 'home'): Promise<void> {
+export async function saveView(store: VuexStore, scope: 'global' | 'user', view: ViewSet | null, userId?: string | null, page: PageKey = PAGE_HOME): Promise<void> {
   const home = pageConfig(store.getters, page);
 
   if (scope === 'user') {

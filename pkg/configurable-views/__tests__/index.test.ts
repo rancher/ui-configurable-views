@@ -4,7 +4,6 @@ jest.mock('@rancher/auto-import', () => ({ importTypes: jest.fn() }), { virtual:
 // The pages are only handed to the router here, so stand-ins do.
 jest.mock('@pkg/configurable-views/pages/Home.vue', () => ({ name: 'ConfigurableHome' }));
 jest.mock('@pkg/configurable-views/pages/ClusterDashboard.vue', () => ({ name: 'ConfigurableClusterDashboard' }));
-jest.mock('@pkg/configurable-views/routing/index', () => ['product routes']);
 jest.mock('@pkg/configurable-views/product', () => ({ product: { name: 'the product' }, pages: ['the pages'] }));
 // The switch itself is stored elsewhere; here it only answers
 const mockToggle = jest.fn();
@@ -19,7 +18,6 @@ describe('extension: configurable-views', () => {
     const { default: init } = await import('@pkg/configurable-views/index');
     const plugin = {
       addProduct:                 jest.fn(),
-      addRoutes:                  jest.fn(),
       addRoute:                   jest.fn(),
       addNavHooks:                jest.fn(),
       addAction:                  jest.fn(),
@@ -49,12 +47,11 @@ describe('extension: configurable-views', () => {
     });
   });
 
-  it('adds its product, routes and navigation hook, and registers no paging of its own', async() => {
+  it('adds its product and navigation hook, and registers no paging of its own', async() => {
     const plugin = await initialize();
 
     expect(plugin.addProduct).toHaveBeenCalledTimes(1);
     expect(plugin.addProduct).toHaveBeenCalledWith({ name: 'the product' }, ['the pages']);
-    expect(plugin.addRoutes).toHaveBeenCalledWith(['product routes']);
     expect(plugin.addNavHooks).toHaveBeenCalledWith({ onEnter: expect.any(Function) });
     expect(plugin.enableServerSidePagination).not.toHaveBeenCalled();
   });
