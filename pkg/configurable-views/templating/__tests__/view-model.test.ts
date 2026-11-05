@@ -1,6 +1,6 @@
 import {
   BUILT_IN_STOCK_ID, DEFAULT_GAP, builtInStockView, canPlace, clampSpan, cssSides, findWidget, heightForPreset, heightPresetOf,
-  insertWidget, isStockView, migrateViewSet, moveInOrder, moveWidget, moveWidgetTo, newLayoutView, newWidgetNode, normalizeWidget,
+  insertWidget, isStockView, migratePageViews, moveInOrder, moveWidget, moveWidgetTo, newLayoutView, newWidgetNode, normalizeWidget,
   orderKeyOf, orderViews, placeOf, removeWidget, setColSpan, spacingPresetOf, updateWidget, widthPresetOf
 } from '@pkg/configurable-views/templating/view-model';
 import type { LayoutView, WidgetNode } from '@pkg/configurable-views/templating/types';
@@ -25,16 +25,16 @@ function tree(): WidgetNode[] {
 const ids = (widgets: WidgetNode[]) => widgets.map((w) => w.id);
 const tabIds = (widgets: WidgetNode[], tabId: string) => ids(findWidget(widgets, 'tabs')?.widget.tabs?.find((t) => t.id === tabId)?.widgets || []);
 
-describe('migrateViewSet', () => {
+describe('migratePageViews', () => {
   it('reads the current shape, keeping the default view', () => {
-    const set = migrateViewSet({ views: [{ id: 'v1', name: 'One' }, { id: 'v2', name: 'Two' }], defaultViewId: 'v2' });
+    const set = migratePageViews({ views: [{ id: 'v1', name: 'One' }, { id: 'v2', name: 'Two' }], defaultViewId: 'v2' });
 
     expect(set.views.map((v) => v.name)).toStrictEqual(['One', 'Two']);
     expect(set.defaultViewId).toBe('v2');
   });
 
   it('reads the shape stored before views were called views', () => {
-    const set = migrateViewSet({
+    const set = migratePageViews({
       panels: [{
         id: 'p1', name: 'Old', widgets: [{ type: 'widget', widget: { kind: 'links' } }]
       }],
@@ -47,17 +47,17 @@ describe('migrateViewSet', () => {
   });
 
   it('prefers the current key when both are stored', () => {
-    const set = migrateViewSet({ views: [{ id: 'new' }], panels: [{ id: 'old' }] });
+    const set = migratePageViews({ views: [{ id: 'new' }], panels: [{ id: 'old' }] });
 
     expect(set.views.map((v) => v.id)).toStrictEqual(['new']);
   });
 
   it('drops a default that names a view which is not there', () => {
-    expect(migrateViewSet({ views: [{ id: 'v1' }], defaultViewId: 'gone' }).defaultViewId).toBeUndefined();
+    expect(migratePageViews({ views: [{ id: 'v1' }], defaultViewId: 'gone' }).defaultViewId).toBeUndefined();
   });
 
   it('keeps a stock view as a stock view, with no widgets', () => {
-    const [view] = migrateViewSet({
+    const [view] = migratePageViews({
       views: [{
         id: 's', name: 'Rancher', kind: 'stock'
       }]
@@ -68,7 +68,7 @@ describe('migrateViewSet', () => {
   });
 
   it('keeps the organization and fork markers', () => {
-    const [view] = migrateViewSet({
+    const [view] = migratePageViews({
       views: [{
         id: 'v', org: true, from: 'source'
       }]
@@ -78,11 +78,11 @@ describe('migrateViewSet', () => {
   });
 
   it('keeps a disabled scope disabled', () => {
-    expect(migrateViewSet({ views: [], disabled: true }).disabled).toBe(true);
+    expect(migratePageViews({ views: [], disabled: true }).disabled).toBe(true);
   });
 
   it('flattens the old tree of rows into widgets in reading order, dropping template nodes', () => {
-    const [view] = migrateViewSet({
+    const [view] = migratePageViews({
       views: [{
         id:        'v',
         organizer: {
@@ -98,7 +98,7 @@ describe('migrateViewSet', () => {
   });
 
   it('turns the legacy tabs of templates into empty views with the same names', () => {
-    const set = migrateViewSet({ tabs: [{ id: 't1', name: 'Ops' }] });
+    const set = migratePageViews({ tabs: [{ id: 't1', name: 'Ops' }] });
 
     expect(set.views).toStrictEqual([expect.objectContaining({
       id: 't1', name: 'Ops', widgets: []
@@ -108,10 +108,10 @@ describe('migrateViewSet', () => {
   it.each([
     ['a legacy template name', 'home'],
     ['nothing', undefined],
-    ['something that is not a view set', { unrelated: true }],
+    ['something that is not a set of views', { unrelated: true }],
     ['an empty list', { views: [] }],
   ])('reads %s as no views, without inventing one', (_, stored) => {
-    expect(migrateViewSet(stored).views).toStrictEqual([]);
+    expect(migratePageViews(stored).views).toStrictEqual([]);
   });
 });
 
@@ -384,7 +384,7 @@ describe('the bar order', () => {
   });
 
   it('reads a stored order, and drops one that is not a list of names', () => {
-    expect(migrateViewSet({ views: [], order: ['a', 3, 'b'] }).order).toStrictEqual(['a', 'b']);
-    expect(migrateViewSet({ views: [], order: 'a' }).order).toBeUndefined();
+    expect(migratePageViews({ views: [], order: ['a', 3, 'b'] }).order).toStrictEqual(['a', 'b']);
+    expect(migratePageViews({ views: [], order: 'a' }).order).toBeUndefined();
   });
 });

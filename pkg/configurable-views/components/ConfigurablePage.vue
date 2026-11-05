@@ -11,7 +11,7 @@ import WidgetSettingsModal from './WidgetSettingsModal.vue';
 import UndoGrowl from './UndoGrowl.vue';
 import { useConfirm } from '../composables/useConfirm';
 import { viewBarLocked, viewBarVisible } from '../composables/useViewBarVisibility';
-import { useViewSet } from '../composables/useViewSet';
+import { usePageViews } from '../composables/usePageViews';
 import { useEditSession } from '../composables/useEditSession';
 import { useViewActions } from '../composables/useViewActions';
 import { useGridEditing } from '../composables/useGridEditing';
@@ -35,7 +35,7 @@ import type { PageKey } from '../templating/template-engine';
 //
 // Edits are a DRAFT: nothing is written until Save.
 //
-// The page is four parts over one set of views: the views themselves and which is open (useViewSet),
+// The page is four parts over one set of views: the views themselves and which is open (usePageViews),
 // editing them (useEditSession), the bar's actions on them (useViewActions), and the open view's grid
 // (useGridEditing). This component wires them to the bar, the grid and the drawer.
 
@@ -70,26 +70,26 @@ const confirm = useConfirm();
 const bar = ref<InstanceType<typeof ViewBar> | null>(null);
 const grid = ref<InstanceType<typeof WidgetGrid> | null>(null);
 
-const vs = useViewSet(props, store, t);
+const pageViews = usePageViews(props, store, t);
 const {
   loaded, editing, activeViewId, selectedNodeId, startedFrom, settingsAnchor, saving, drawerOpen, error,
   templatingEnabled, defaultViewId, views, publishedIds, changedIds, activeView, isNewView, activeIsStock, widgets, gap, dirty,
-} = vs;
+} = pageViews;
 
 const {
   enterEdit, leaveEdit, cancelEdit, save, saveAsNewView, renameView, newView, startingPoints, startFrom,
-} = useEditSession(vs, props, store, t, confirm);
+} = useEditSession(pageViews, props, store, t, confirm);
 
 const {
   renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView, undo, closeUndo, runUndo,
-} = useViewActions(vs, props, store, t, confirm, bar, leaveEdit);
+} = useViewActions(pageViews, props, store, t, confirm, bar, leaveEdit);
 
 const {
   selectedNode, settingsNode, flash, surfaceStyle, addFromCatalog, onCatalogDragStart, onCatalogDragEnd,
   setSelectedWidth, setSelectedHeight, setSelectedSpacing, setGap, setPagePadding, closeSettings, applySettings, removeConfigured,
-} = useGridEditing(vs, t);
+} = useGridEditing(pageViews, t);
 
-vs.load();
+pageViews.load();
 
 // While editing, the whole column around the grid - its padding, the room below it - is somewhere
 // to drop: a drag over it is the grid's. The grid stops the ones over itself before they get here.
@@ -150,11 +150,11 @@ onBeforeUnmount(() => {
 });
 
 const barListeners = {
-  select: vs.setActiveView,
+  select: pageViews.setActiveView,
   // From a tab's menu: that view is opened, then edited. Rancher's own page has nothing to edit, so
   // its menu does not offer to.
   edit:   (id: string) => {
-    vs.setActiveView(id);
+    pageViews.setActiveView(id);
     if (!activeIsStock.value) {
       enterEdit();
     }

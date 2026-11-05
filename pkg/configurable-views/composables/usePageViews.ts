@@ -9,7 +9,7 @@ import {
   DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews
 } from '../templating/view-model';
 import type { SettingsAnchor } from './viewEditor';
-import type { LayoutView, View, ViewSet } from '../templating/types';
+import type { LayoutView, View, PageViews } from '../templating/types';
 
 
 export const clone = <T, >(value: T): T => JSON.parse(JSON.stringify(value));
@@ -39,14 +39,14 @@ export function viewContent(view: View): string {
  * organization's scope and appear in the same bar. Editing one of those does not change what everyone
  * else sees: it forks the view into your account first.
  */
-export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['t']) {
+export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n['t']) {
   // ---- state ----
 
   const userId = ref<string | null>(null);
   const loaded = ref(false);
   const editing = ref(false);
   /** The draft: a working copy of YOUR views while editing. */
-  const working = ref<ViewSet | null>(null);
+  const working = ref<PageViews | null>(null);
   /** JSON of the last SAVED state, for the dirty check. */
   const savedBaseline = ref<string | null>(null);
   const activeViewId = ref<string | null>(null);
@@ -69,7 +69,7 @@ export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['
    * What a view-mode action just wrote, shown until the stored copy catches up - so a dragged tab, a
    * rename or a delete lands at once rather than after the round trip.
    */
-  const optimistic = ref<ViewSet | null>(null);
+  const optimistic = ref<PageViews | null>(null);
 
   // ---- what is stored, and what is shown ----
 
@@ -81,12 +81,12 @@ export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['
   const scopes = computed(() => appliedViewScopes(store.getters, userId.value, props.page));
 
   // Your saved views (what the editor writes), and the ones an admin published for the organization.
-  const userSet = computed<ViewSet | null>(() => optimistic.value || scopes.value.user);
+  const userSet = computed<PageViews | null>(() => optimistic.value || scopes.value.user);
   const orgViews = computed(() => scopes.value.global?.views || []);
   const orgIds = computed(() => new Set(orgViews.value.map((p) => p.id)));
 
   /** A working copy of your stored views, for an action to change and write back. */
-  const userDraft = (): ViewSet => (userSet.value ? clone(userSet.value) : { views: [] });
+  const userDraft = (): PageViews => (userSet.value ? clone(userSet.value) : { views: [] });
 
   // What a brand-new view is seeded from: the organization template. A stock view is skipped — it
   // has no grid, so starting from it would give you nothing to edit.
@@ -222,7 +222,7 @@ export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['
 
   // Write a whole user-scope draft straight through (the view-mode actions, which have no draft). It
   // shows at once, and the stored copy takes over when it lands.
-  async function persist(draft: ViewSet, activeId: string | null): Promise<void> {
+  async function persist(draft: PageViews, activeId: string | null): Promise<void> {
     saving.value = true;
     error.value = '';
     optimistic.value = draft;
@@ -245,7 +245,7 @@ export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['
    * A published view is everyone's, so changing it for yourself - renaming it, making it your default,
    * editing it - forks it into your account first. Returns the id to change.
    */
-  function ownCopy(draft: ViewSet, view: View): string {
+  function ownCopy(draft: PageViews, view: View): string {
     if (!view.org) {
       return view.id;
     }
@@ -303,5 +303,5 @@ export function useViewSet(props: { page: PageKey }, store: VuexStore, t: I18n['
   };
 }
 
-/** A page's views, as useViewSet returns them - what the other parts of the page work over. */
-export type ViewSetState = ReturnType<typeof useViewSet>;
+/** A page's views, as usePageViews returns them - what the other parts of the page work over. */
+export type PageViewsState = ReturnType<typeof usePageViews>;

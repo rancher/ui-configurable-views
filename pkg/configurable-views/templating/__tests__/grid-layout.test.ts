@@ -1,7 +1,7 @@
 import {
   dropInto, gridCells, gridLines, liftFrom, liftWidget, moveWidgetToCell, resizeIn, resizeStartIn, resizeWidget
 } from '@pkg/configurable-views/templating/grid-layout';
-import { findWidget, migrateViewSet, newWidgetNode } from '@pkg/configurable-views/templating/view-model';
+import { findWidget, migratePageViews, newWidgetNode } from '@pkg/configurable-views/templating/view-model';
 import type { WidgetNode } from '@pkg/configurable-views/templating/types';
 
 const w = (id: string, colSpan: number, extra: Partial<WidgetNode> = {}): WidgetNode => ({ ...newWidgetNode('links', { id, colSpan }), ...extra });
@@ -28,7 +28,7 @@ describe('the grid layout', () => {
   });
 
   it('reads stored offsets and line starts, and leaves them out when they say nothing', () => {
-    const set = migrateViewSet({
+    const set = migratePageViews({
       views: [{
         id:      'v',
         name:    'V',

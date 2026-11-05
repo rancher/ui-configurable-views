@@ -6,9 +6,9 @@ import {
   newId, newLayoutView, isStockView, BUILT_IN_STOCK_ID, orderKeyOf
 } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
-import { clone, type ViewSetState } from './useViewSet';
+import { clone, type PageViewsState } from './usePageViews';
 import type { ConfirmOptions } from './useConfirm';
-import type { View, ViewSet } from '../templating/types';
+import type { View, PageViews } from '../templating/types';
 
 /** What the actions ask of the bar: to bring a tab into sight, and to open one's name for typing. */
 interface BarControls {
@@ -25,7 +25,7 @@ const UNDO_TIMEOUT = 10000;
  * editor). A delete is done at once and offered back for a while.
  */
 export function useViewActions(
-  vs: ViewSetState,
+  pageViews: PageViewsState,
   props: { page: PageKey; title: string },
   store: VuexStore,
   t: I18n['t'],
@@ -35,36 +35,36 @@ export function useViewActions(
 ) {
   const {
     editing, activeViewId, pinnedView, saving, error, userId, scopes, orgIds, views,
-  } = vs;
+  } = pageViews;
 
   // Renamed in place on its tab.
   async function renameStoredView(id: string, name: string): Promise<void> {
-    const view = vs.viewById(id);
+    const view = pageViews.viewById(id);
 
     if (!view || isStockView(view)) {
       return;
     }
 
-    const draft = vs.userDraft();
-    const ownId = vs.ownCopy(draft, view);
+    const draft = pageViews.userDraft();
+    const ownId = pageViews.ownCopy(draft, view);
     const mine = draft.views.find((p) => p.id === ownId);
 
     if (mine) {
       mine.name = name;
     }
 
-    await vs.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
+    await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
   }
 
   // The copy lands in front of you with its name open for typing, as a copied table view does.
   async function duplicateView(id: string): Promise<void> {
-    const source = vs.viewById(id);
+    const source = pageViews.viewById(id);
 
     if (!source) {
       return;
     }
 
-    const draft = vs.userDraft();
+    const draft = pageViews.userDraft();
     const name = t('configurableViews.page.copyName', { name: source.name }, true);
     // A copy of Rancher's own page is the page rebuilt from widgets, so there is something to change
     const copy: View = isStockView(source) ? {
@@ -77,40 +77,40 @@ export function useViewActions(
     delete copy.from;
     draft.views.push(copy);
 
-    await vs.persist(draft, copy.id);
+    await pageViews.persist(draft, copy.id);
     bar.value?.focusTab(copy.id, true);
     bar.value?.openRename(copy.id);
   }
 
   // Your default is the view the page opens on. Picking Rancher's own page is how to go back to none.
   async function setDefaultView(id: string): Promise<void> {
-    const view = vs.viewById(id);
+    const view = pageViews.viewById(id);
 
     if (!view) {
       return;
     }
 
-    const draft = vs.userDraft();
+    const draft = pageViews.userDraft();
 
     if (view.id === BUILT_IN_STOCK_ID) {
       delete draft.defaultViewId;
-      await vs.persist(draft, activeViewId.value);
+      await pageViews.persist(draft, activeViewId.value);
 
       return;
     }
 
-    const ownId = vs.ownCopy(draft, view);
+    const ownId = pageViews.ownCopy(draft, view);
 
     draft.defaultViewId = ownId;
-    await vs.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
+    await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
   }
 
   // The order the tabs were dragged into, by the key each view keeps its place by.
   async function reorderViews(ids: string[]): Promise<void> {
-    const draft = vs.userDraft();
+    const draft = pageViews.userDraft();
 
-    draft.order = ids.map(vs.viewById).filter((view): view is View => !!view).map((view) => orderKeyOf(view, orgIds.value));
-    await vs.persist(draft, activeViewId.value);
+    draft.order = ids.map(pageViews.viewById).filter((view): view is View => !!view).map((view) => orderKeyOf(view, orgIds.value));
+    await pageViews.persist(draft, activeViewId.value);
   }
 
   /**
@@ -125,7 +125,7 @@ export function useViewActions(
     }
 
     if (editing.value) {
-      const view = vs.workingView();
+      const view = pageViews.workingView();
 
       if (view) {
         view.from = publishedId;
@@ -146,7 +146,7 @@ export function useViewActions(
   // Publish the view to everyone. It joins the organization's scope, which is the only thing on this
   // page that is not personal — so it asks first.
   async function publishView(id: string): Promise<void> {
-    const source = editing.value && id === activeViewId.value ? vs.workingView() : vs.viewById(id);
+    const source = editing.value && id === activeViewId.value ? pageViews.workingView() : pageViews.viewById(id);
 
     if (!source || isStockView(source) || !await confirm({
       title:  t('configurableViews.page.publish.title'),
@@ -156,7 +156,7 @@ export function useViewActions(
       return;
     }
 
-    const org: ViewSet = scopes.value.global ? clone(scopes.value.global) : { views: [] };
+    const org: PageViews = scopes.value.global ? clone(scopes.value.global) : { views: [] };
     const published: View = { ...clone(source), id: source.from || source.id };
 
     delete published.org;
@@ -192,7 +192,7 @@ export function useViewActions(
   // its own, so a check here would only be a suggestion. The write goes to the API and its RBAC
   // answers — a user who may not remove it gets that back as the error below.
   async function unpublishView(id: string): Promise<void> {
-    const view = vs.viewById(id);
+    const view = pageViews.viewById(id);
     const orgId = view?.org ? view.id : view?.from;
 
     if (!view || isStockView(view) || !orgId || !orgIds.value.has(orgId) || !await confirm({
@@ -208,7 +208,7 @@ export function useViewActions(
     error.value = '';
 
     try {
-      const org: ViewSet = scopes.value.global ? clone(scopes.value.global) : { views: [] };
+      const org: PageViews = scopes.value.global ? clone(scopes.value.global) : { views: [] };
 
       org.views = org.views.filter((p) => p.id !== orgId);
       await saveView(store, 'global', org.views.length ? org : null, userId.value, props.page);
@@ -218,7 +218,7 @@ export function useViewActions(
         activeViewId.value = null;
         pinnedView.value = false;
       }
-      vs.syncActiveView();
+      pageViews.syncActiveView();
     } catch (e) {
       error.value = (e as Error)?.message || String(e);
     } finally {
@@ -259,7 +259,7 @@ export function useViewActions(
    * it was your default. A published view is not deleted but unpublished (see unpublishView).
    */
   async function deleteView(id: string): Promise<void> {
-    const target = vs.viewById(id);
+    const target = pageViews.viewById(id);
 
     if (!target || isStockView(target)) {
       return;
@@ -276,7 +276,7 @@ export function useViewActions(
       await leaveEdit();
     }
 
-    const before = vs.userDraft();
+    const before = pageViews.userDraft();
     const at = before.views.findIndex((p) => p.id === id);
 
     if (at < 0) {
@@ -297,14 +297,14 @@ export function useViewActions(
       delete draft.defaultViewId;
     }
 
-    await vs.persist(draft, wasActive ? neighbour?.id || null : activeViewId.value);
+    await pageViews.persist(draft, wasActive ? neighbour?.id || null : activeViewId.value);
 
     if (neighbour) {
       bar.value?.focusTab(neighbour.id);
     }
 
     offerUndo(t('configurableViews.bar.deleted'), t('configurableViews.bar.deletedMessage', { name: removed.name }, true), async() => {
-      const now = vs.userDraft();
+      const now = pageViews.userDraft();
 
       now.views.splice(Math.min(at, now.views.length), 0, removed);
 
@@ -312,7 +312,7 @@ export function useViewActions(
         now.defaultViewId = removed.id;
       }
 
-      await vs.persist(now, wasActive ? removed.id : activeViewId.value);
+      await pageViews.persist(now, wasActive ? removed.id : activeViewId.value);
     });
   }
 

@@ -11,7 +11,7 @@ import {
   dropWidget, liftWidget, moveWidgetToCell, resizeWidget, resizeWidgetStart, type DropTarget
 } from '../templating/grid-layout';
 import type { CatalogEntry } from '../templating/widget-catalog';
-import type { ViewSetState } from './useViewSet';
+import type { PageViewsState } from './usePageViews';
 import type { WidgetNode, WidgetPlace, WidgetSpec } from '../templating/types';
 
 /**
@@ -29,10 +29,10 @@ const FLASH_MS = 1000;
  * Provides the editor the grid and its widgets ask of (VIEW_EDITOR), so neither has to re-emit up a
  * chain.
  */
-export function useGridEditing(vs: ViewSetState, t: I18n['t']) {
+export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
   const {
     editing, selectedNodeId, settingsNodeId, settingsAnchor, drawerOpen, activeView, widgets, gap,
-  } = vs;
+  } = pageViews;
 
   // Shared, reactive editor UI state: what is being dragged — a widget already on the grid, or a
   // catalog entry on its way in.
@@ -78,7 +78,7 @@ export function useGridEditing(vs: ViewSetState, t: I18n['t']) {
   // Every change to the grid goes through here: it replaces the active view's widget list with a new
   // one, so a mutation is always a pure list operation over a draft.
   function mutate(fn: (widgets: WidgetNode[]) => WidgetNode[]): void {
-    const view = vs.workingLayout();
+    const view = pageViews.workingLayout();
 
     if (view) {
       view.widgets = fn(view.widgets);
@@ -171,7 +171,7 @@ export function useGridEditing(vs: ViewSetState, t: I18n['t']) {
   let resizeBase: WidgetNode[] | null = null;
 
   function beginResize(id: string): void {
-    resizeBase = vs.workingLayout()?.widgets || null;
+    resizeBase = pageViews.workingLayout()?.widgets || null;
     selectNode(id);
   }
 
@@ -229,7 +229,7 @@ export function useGridEditing(vs: ViewSetState, t: I18n['t']) {
   }
 
   function setGap(value: string): void {
-    const view = vs.workingLayout();
+    const view = pageViews.workingLayout();
 
     if (view) {
       view.gap = Math.max(0, Math.min(64, Math.round(Number(value) || 0)));
@@ -238,7 +238,7 @@ export function useGridEditing(vs: ViewSetState, t: I18n['t']) {
   }
 
   function setPagePadding(value: string): void {
-    const view = vs.workingLayout();
+    const view = pageViews.workingLayout();
 
     if (view) {
       view.pad = Math.max(0, Math.min(96, Math.round(Number(value) || 0)));

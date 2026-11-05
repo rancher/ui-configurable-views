@@ -13,7 +13,7 @@ import {
 } from '../templating/template-engine';
 import { cssSize, isStockView, normalizeSides } from '../templating/view-model';
 import { blockLabelKey } from '../templating/widget-catalog';
-import type { View, ViewSet, WidgetNode } from '../templating/types';
+import type { View, PageViews, WidgetNode } from '../templating/types';
 
 // CONFIGURABLE VIEWS — what is saved for every configurable page: the Home and the Cluster Dashboard,
 // one tab each. A page has VIEWS (the tabs in its bar), for the organization and for you, and each
@@ -31,7 +31,7 @@ interface PageEntry {
 interface Section {
   key: string;
   label: string;
-  set: ViewSet;
+  set: PageViews;
 }
 
 const store = useStore();

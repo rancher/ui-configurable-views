@@ -1,9 +1,9 @@
 import type { RancherKubeMetadata } from '@shell/types/rancher/steve.api';
 
 /**
- * The shapes behind the configurable pages. These are the STORED contract — a view set round-trips
+ * The shapes behind the configurable pages. These are the STORED contract — a page's views round-trip
  * through a ConfigMap, so changing a field name here changes what already-saved pages mean; when one
- * does change, the old name keeps being read (see migrateViewSet).
+ * does change, the old name keeps being read (see migratePageViews).
  *
  *   PAGE (the Home, a cluster's dashboard) → VIEWS (tabs, when there is more than one) → WIDGETS
  */
@@ -157,7 +157,7 @@ export interface StockView {
 export type View = LayoutView | StockView;
 
 /** What one scope - the organization, or one person - has saved for a page: its views, and which opens first. */
-export interface ViewSet {
+export interface PageViews {
   views: View[];
   defaultViewId?: string;
   /**

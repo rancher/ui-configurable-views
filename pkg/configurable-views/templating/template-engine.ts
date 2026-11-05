@@ -14,8 +14,8 @@
 
 import type { VuexStore } from '@shell/types/store/vuex';
 import { CONFIG_MAP } from '@shell/config/types';
-import { migrateViewSet } from './view-model';
-import type { ViewSet } from './types';
+import { migratePageViews } from './view-model';
+import type { PageViews } from './types';
 
 type Getters = VuexStore['getters'];
 
@@ -53,7 +53,7 @@ interface ConfigMapModel {
   save(): Promise<unknown>;
 }
 
-/** What one page's key of `templating-home` holds, parsed. Views stay `unknown` until migrateViewSet has checked them. */
+/** What one page's key of `templating-home` holds, parsed. Views stay `unknown` until migratePageViews has checked them. */
 export interface PageConfig {
   global?: unknown;
   users?: Record<string, unknown>;
@@ -62,11 +62,11 @@ export interface PageConfig {
 /** The saved views as one user sees them. */
 export interface ViewScopes {
   /** The organization's view, as stored (disabled or not) - what an editor edits. */
-  global: ViewSet | null;
+  global: PageViews | null;
   /** This user's own view, as stored. */
-  user: ViewSet | null;
+  user: PageViews | null;
   /** What actually renders: the user's if enabled, else the organization's if enabled, else none. */
-  resolved: ViewSet | null;
+  resolved: PageViews | null;
   hasGlobal: boolean;
   hasUser: boolean;
 }
@@ -131,15 +131,15 @@ export function getPageConfig(getters: Getters, page: PageKey = PAGE_HOME): Page
 /**
  * The saved views split by scope, and the one THIS user sees: their own overrides the
  * organization's, and a disabled view is skipped so the scope beneath it shows. Old stored shapes
- * are migrated on read (see migrateViewSet).
+ * are migrated on read (see migratePageViews).
  */
 export function appliedViewScopes(getters: Getters, userId?: string | null, page: PageKey = PAGE_HOME): ViewScopes {
   const home = pageConfig(getters, page);
   const rawGlobal = home.global || null;
   const rawUser = (userId && home.users?.[userId]) || null;
 
-  const global = rawGlobal ? migrateViewSet(rawGlobal) : null;
-  const user = rawUser ? migrateViewSet(rawUser) : null;
+  const global = rawGlobal ? migratePageViews(rawGlobal) : null;
+  const user = rawUser ? migratePageViews(rawUser) : null;
   const userApplied = user && !user.disabled ? user : null;
   const globalApplied = global && !global.disabled ? global : null;
 
@@ -228,7 +228,7 @@ export async function savePageConfig(store: VuexStore, config: PageConfig | null
 }
 
 /** Save one scope's view of a page. `null` clears that scope. */
-export async function saveView(store: VuexStore, scope: 'global' | 'user', view: ViewSet | null, userId?: string | null, page: PageKey = PAGE_HOME): Promise<void> {
+export async function saveView(store: VuexStore, scope: 'global' | 'user', view: PageViews | null, userId?: string | null, page: PageKey = PAGE_HOME): Promise<void> {
   const home = pageConfig(store.getters, page);
 
   if (scope === 'user') {

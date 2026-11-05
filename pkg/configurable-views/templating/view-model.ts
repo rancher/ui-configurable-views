@@ -20,7 +20,7 @@
 // what it gets: a view round-trips through a ConfigMap anyone with access can edit by hand.
 
 import {
-  NODE_WIDGET, type LayoutView, type View, type Sides, type StockView, type ViewSet, type WidgetKind,
+  NODE_WIDGET, type LayoutView, type View, type Sides, type StockView, type PageViews, type WidgetKind,
   type WidgetNode, type WidgetPlace, type WidgetSpec, type WidgetTab, type MetricsDashboard
 } from './types';
 
@@ -538,12 +538,12 @@ function normalizeView(view: Loose): View {
 }
 
 /** A VIEW with nothing saved in it. The page still shows its stock tab (see builtInStockView). */
-function emptyViewSet(): ViewSet {
+function emptyPageViews(): PageViews {
   return { views: [] };
 }
 
 /**
- * Coerce ANY stored value into a valid VIEW SET:
+ * Coerce ANY stored value into a valid PageViews:
  *   - the current shape          { views: [ { widgets } ] }
  *   - the same, as first named   { panels: [ { widgets } ], defaultPanelId }
  *   - the organizer-tree shape   { views: [ { organizer } ] }
@@ -556,9 +556,9 @@ function emptyViewSet(): ViewSet {
  * making sure a page had a tab - which invented a view with a fresh id on every read, and named it
  * "Home" on pages that are not the Home. Every page now has its stock tab instead, stored or not.
  */
-export function migrateViewSet(value: unknown): ViewSet {
-  const finish = (views: View[], source: Loose | null): ViewSet => {
-    const out: ViewSet = { views };
+export function migratePageViews(value: unknown): PageViews {
+  const finish = (views: View[], source: Loose | null): PageViews => {
+    const out: PageViews = { views };
     const defaultId = str(source?.defaultViewId);
 
     // Which view opens first. Dropped when it names a view that no longer exists.
@@ -598,7 +598,7 @@ export function migrateViewSet(value: unknown): ViewSet {
     return finish([], null);
   }
 
-  return emptyViewSet();
+  return emptyPageViews();
 }
 
 // ---- list operations (used by the editor; all return NEW lists) ----------------------------------

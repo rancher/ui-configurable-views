@@ -2,7 +2,7 @@ import type { VuexStore } from '@shell/types/store/vuex';
 import {
   appliedViewScopes, getPageConfig, isTemplatingEnabled, saveView, toggleTemplating, viewsOffInUrl
 } from '@pkg/configurable-views/templating/template-engine';
-import type { ViewSet } from '@pkg/configurable-views/templating/types';
+import type { PageViews } from '@pkg/configurable-views/templating/types';
 
 const MARKER = 'templates.rancher.io/ai-templating';
 
@@ -42,7 +42,7 @@ function storeWith(...maps: FakeConfigMap[]) {
   };
 }
 
-const set = (...names: string[]): ViewSet => ({
+const set = (...names: string[]): PageViews => ({
   views: names.map((name) => ({
     id: name, name, kind: 'stock' as const
   }))

@@ -4,9 +4,9 @@ import type { I18n } from '@shell/composables/useI18n';
 import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
 import { DEFAULT_GAP, newId, newLayoutView, isStockView } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
-import { clone, viewContent, type ViewSetState } from './useViewSet';
+import { clone, viewContent, type PageViewsState } from './usePageViews';
 import type { ConfirmOptions } from './useConfirm';
-import type { LayoutView, View, ViewSet } from '../templating/types';
+import type { LayoutView, View, PageViews } from '../templating/types';
 
 // A starting point that is no saved view: Rancher's own page, rebuilt from widgets.
 const STOCK_START = 'stock-page';
@@ -19,7 +19,7 @@ const STOCK_START = 'stock-page';
  * sees by accident.
  */
 export function useEditSession(
-  vs: ViewSetState,
+  pageViews: PageViewsState,
   props: { page: PageKey; title: string; firstViewName: string },
   store: VuexStore,
   t: I18n['t'],
@@ -28,7 +28,7 @@ export function useEditSession(
   const {
     editing, working, savedBaseline, activeViewId, pinnedView, selectedNodeId, newViewId, startedFrom,
     settingsNodeId, saving, drawerOpen, error, userId, orgViews, orgTemplate, activeView, views, dirty,
-  } = vs;
+  } = pageViews;
 
   // With nothing of yours to edit - no views on this page, and the one showing is Rancher's own or
   // the organization's - a first view is started for you. Not when a new view is about to be made
@@ -36,7 +36,7 @@ export function useEditSession(
   function enterEdit({ seedFirst = true } = {}): void {
     error.value = '';
 
-    const draft = vs.userDraft();
+    const draft = pageViews.userDraft();
     const active = activeView.value;
 
     working.value = draft;
@@ -48,12 +48,12 @@ export function useEditSession(
 
       delete fork.org;
       draft.views.push(fork);
-      vs.setActiveView(fork.id);
+      pageViews.setActiveView(fork.id);
     } else if (seedFirst && !draft.views.length) {
       const first = newLayoutView(props.firstViewName);
 
       draft.views.push(first);
-      vs.setActiveView(first.id);
+      pageViews.setActiveView(first.id);
     }
 
     savedBaseline.value = JSON.stringify(draft);
@@ -71,7 +71,7 @@ export function useEditSession(
     selectedNodeId.value = null;
     settingsNodeId.value = null;
     await fetchTemplatingConfigMaps(store);
-    vs.syncActiveView();
+    pageViews.syncActiveView();
   }
 
   async function cancelEdit(): Promise<void> {
@@ -92,7 +92,7 @@ export function useEditSession(
    * where the editor had to put the draft. Saving it would leave a duplicate in the bar forever, so
    * those are dropped on the way out.
    */
-  function pruneUntouchedForks(draft: ViewSet): void {
+  function pruneUntouchedForks(draft: PageViews): void {
     const sources = new Map(orgViews.value.map((p) => [p.id, viewContent(p)]));
     const dropped = new Set<string>();
 
@@ -148,7 +148,7 @@ export function useEditSession(
   // Keep the view you started from as it was, and save your changes as a view of their own.
   async function saveAsNewView(): Promise<void> {
     const draft = working.value;
-    const view = vs.workingView();
+    const view = pageViews.workingView();
 
     if (!draft || !view || savedBaseline.value === null) {
       return;
@@ -161,7 +161,7 @@ export function useEditSession(
     delete copy.from;
 
     // The original goes back to how it was saved; the copy carries the edits.
-    const original = (JSON.parse(savedBaseline.value) as ViewSet).views.find((p) => p.id === view.id);
+    const original = (JSON.parse(savedBaseline.value) as PageViews).views.find((p) => p.id === view.id);
 
     if (original) {
       Object.assign(view, clone(original));
@@ -170,14 +170,14 @@ export function useEditSession(
     }
 
     draft.views.push(copy);
-    vs.setActiveView(copy.id);
+    pageViews.setActiveView(copy.id);
 
     await save();
   }
 
   // The name typed into the bar while editing.
   function renameView(name: string): void {
-    const view = vs.workingView();
+    const view = pageViews.workingView();
 
     if (view) {
       view.name = name;
@@ -206,7 +206,7 @@ export function useEditSession(
     delete view.from;
 
     draft.views.push(view);
-    vs.setActiveView(view.id);
+    pageViews.setActiveView(view.id);
     newViewId.value = view.id;
     startedFrom.value = template ? t('configurableViews.page.orgTemplate') : '';
   }
@@ -224,7 +224,7 @@ export function useEditSession(
 
   // The starting-point chips on a brand-new view: swap what it was seeded with.
   function startFrom(sourceId: string): void {
-    const view = vs.workingLayout();
+    const view = pageViews.workingLayout();
 
     if (!view) {
       return;
