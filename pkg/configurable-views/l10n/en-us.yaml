@@ -146,9 +146,7 @@ configurableViews:
     tableTruncated: This cluster has more rows than a widget reads at once, so the table shows, sorts and filters the first of them.
     certsTruncated: This cluster has more certificates than are read at once, so the list is ordered over the first of them.
     tabs:
-      label: Tabs
       empty: Nothing in this tab yet.
-      count: "{count, plural, =1 {1 widget in this tab} other {# widgets in this tab}}"
   errors:
     alerts: "Could not read the alerts of cluster “{cluster}”."
     capacity: "Could not read the capacity of cluster “{cluster}”."

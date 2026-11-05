@@ -4,6 +4,7 @@ import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import Tabbed from '@shell/components/Tabbed/index.vue';
 import Tab from '@shell/components/Tabbed/Tab.vue';
+import { RcButton } from '@components/RcButton';
 import CatalogTile from './CatalogTile.vue';
 import {
   BUILDING_BLOCKS, READY_MADE, searchCatalog, blockLabelKey, type CatalogEntry
@@ -227,14 +228,16 @@ function valueOf(ev: Event): string {
           &nbsp;-&nbsp; {{ view.name }}
         </template>
       </h3>
-      <button
+      <RcButton
+        variant="ghost"
+        size="small"
         class="evs__close"
         :title="t('generic.close')"
         :aria-label="t('configurableViews.sidebar.closeEditor')"
         @click="$emit('close')"
       >
         <i class="icon icon-close" />
-      </button>
+      </RcButton>
     </header>
 
     <!-- The product's own tabs, as the Extensions page uses them: the row only, with the body below
@@ -286,21 +289,25 @@ function valueOf(ev: Event): string {
             {{ t('configurableViews.sidebar.newHint') }}
           </p>
           <div class="evs__chips">
-            <button
+            <RcButton
+              variant="ghost"
+              size="small"
               class="evs__chip"
               @click="$emit('start-from', '')"
             >
               {{ t('configurableViews.sidebar.startEmpty') }}
-            </button>
-            <button
+            </RcButton>
+            <RcButton
               v-for="point in startingPoints"
               :key="point.id"
               v-clean-tooltip="point.label"
+              variant="ghost"
+              size="small"
               class="evs__chip"
               @click="$emit('start-from', point.id)"
             >
-              {{ point.label }}
-            </button>
+              <span class="evs__chip-label">{{ point.label }}</span>
+            </RcButton>
           </div>
           <p class="evs__hint">
             {{ t('configurableViews.sidebar.newFootnote') }}
@@ -383,15 +390,16 @@ function valueOf(ev: Event): string {
               {{ t('configurableViews.sidebar.width') }}
             </h4>
             <div class="evs__seg">
-              <button
+              <RcButton
                 v-for="w in widths"
                 :key="w.id"
+                :variant="widthPreset === w.id ? 'primary' : 'ghost'"
+                size="small"
                 class="evs__pill"
-                :class="{ 'evs__pill--on': widthPreset === w.id }"
                 @click="$emit('set-width', w.span)"
               >
                 {{ t(w.labelKey) }}
-              </button>
+              </RcButton>
             </div>
           </div>
 
@@ -400,15 +408,16 @@ function valueOf(ev: Event): string {
               {{ t('configurableViews.sidebar.height') }}
             </h4>
             <div class="evs__seg">
-              <button
+              <RcButton
                 v-for="h in heights"
                 :key="h.id"
+                :variant="heightPreset === h.id ? 'primary' : 'ghost'"
+                size="small"
                 class="evs__pill"
-                :class="{ 'evs__pill--on': heightPreset === h.id }"
                 @click="$emit('set-height', h.id)"
               >
                 {{ t(h.labelKey) }}
-              </button>
+              </RcButton>
             </div>
           </div>
 
@@ -417,15 +426,16 @@ function valueOf(ev: Event): string {
               {{ t('configurableViews.sidebar.spacing') }}
             </h4>
             <div class="evs__seg">
-              <button
+              <RcButton
                 v-for="s in spacings"
                 :key="s.id"
+                :variant="spacingPreset === s.id ? 'primary' : 'ghost'"
+                size="small"
                 class="evs__pill"
-                :class="{ 'evs__pill--on': spacingPreset === s.id }"
                 @click="$emit('set-spacing', s.id)"
               >
                 {{ t(s.labelKey) }}
-              </button>
+              </RcButton>
             </div>
           </div>
         </template>
@@ -494,25 +504,28 @@ function valueOf(ev: Event): string {
         <h4 class="evs__group">
           {{ t('configurableViews.sidebar.thisView') }}
         </h4>
-        <button
-          class="btn btn-sm role-secondary evs__wide"
+        <RcButton
+          variant="secondary"
+          class="evs__wide"
           :disabled="isDefault"
           @click="$emit('set-default')"
         >
           {{ isDefault ? t('configurableViews.sidebar.isDefault') : t('configurableViews.sidebar.setDefault') }}
-        </button>
-        <button
-          class="btn btn-sm role-secondary evs__wide"
+        </RcButton>
+        <RcButton
+          variant="secondary"
+          class="evs__wide"
           @click="$emit('publish')"
         >
           {{ t('configurableViews.sidebar.publish') }}
-        </button>
-        <button
-          class="btn btn-sm role-link evs__wide evs__danger"
+        </RcButton>
+        <RcButton
+          variant="link"
+          class="evs__wide evs__danger"
           @click="$emit('delete')"
         >
           {{ t('configurableViews.sidebar.delete') }}
-        </button>
+        </RcButton>
       </template>
     </div>
   </aside>
@@ -574,14 +587,13 @@ function valueOf(ev: Event): string {
   }
 
   &__close {
-    background:  transparent;
-    border:      none;
-    color:       var(--muted);
-    cursor:      pointer;
-    font-size:   16px;
-    line-height: 1;
-    min-height:  0;
-    padding:     4px;
+    --rc-button-padding: 4px;
+
+    color: var(--muted);
+
+    i {
+      font-size: 16px;
+    }
 
     &:hover {
       color: var(--link);
@@ -693,27 +705,12 @@ function valueOf(ev: Event): string {
     overflow:      hidden;
   }
 
-  &__pill {
-    background:    transparent;
-    border:        none;
-    border-radius: 4px;
-    color:         var(--body-text);
-    cursor:        pointer;
-    font-size:     12px;
-    // Said explicitly: the shell's global button rule is 40px tall, a segment here is 24.
-    height:        24px;
-    line-height:   24px;
-    min-height:    24px;
-    padding:       0 8px;
-    white-space:   nowrap;
+  // The one that is on is a primary button; the others have no look until hovered.
+  &__pill.variant-ghost {
+    color: var(--body-text);
 
-    &:hover:not(&--on) {
+    &:hover {
       background: color-mix(in srgb, var(--primary) 12%, transparent);
-    }
-
-    &--on {
-      background: var(--primary);
-      color:      var(--primary-text);
     }
   }
 
@@ -757,32 +754,29 @@ function valueOf(ev: Event): string {
     gap:       6px;
   }
 
-  // A 24px pill: 12px label, 4/10 inside, the drawer's own hairline round it. The shell's global
-  // .btn rule is why the height is stated three ways.
+  // A 24px pill: 12px label, the drawer's own hairline round it.
   &__chip {
-    background:    transparent;
+    --rc-button-padding: 3px 10px;
+
     border:        1px solid var(--border);
     border-radius: 12px;
-    box-sizing:    border-box;
     color:         var(--link);
-    cursor:        pointer;
-    font-size:     12px;
-    height:        24px;
-    line-height:   14px;
-    min-height:    24px;
     // A long view name is cut short rather than running out of the drawer; the tooltip has it whole
     max-width:     200px;
-    overflow:      hidden;
-    padding:       4px 10px;
-    text-overflow: ellipsis;
-    white-space:   nowrap;
 
     &:hover {
       border-color: var(--primary);
+      color:        var(--link);
     }
   }
 
-  &__danger {
+  &__chip-label {
+    min-width:     0;
+    overflow:      hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__danger.rc-button.variant-link {
     color: var(--error);
   }
 }

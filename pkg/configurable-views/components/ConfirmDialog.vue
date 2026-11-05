@@ -7,6 +7,7 @@
 import { onMounted } from 'vue';
 import { useStore } from 'vuex';
 import { Card } from '@components/Card';
+import { RcButton } from '@components/RcButton';
 import { useI18n } from '@shell/composables/useI18n';
 
 const props = defineProps<{
@@ -59,23 +60,24 @@ function answer(ok: boolean): void {
     <template #actions>
       <div class="configurable-views-confirm__bottom">
         <div class="configurable-views-confirm__buttons">
-          <button
-            role="button"
-            class="btn role-secondary mr-10"
+          <RcButton
+            variant="secondary"
+            size="large"
+            class="mr-10"
             data-testid="configurable-views-confirm-cancel"
             @click="answer(false)"
           >
             {{ t('generic.cancel') }}
-          </button>
-          <button
-            role="button"
-            class="btn"
-            :class="danger ? 'bg-error' : 'role-primary'"
+          </RcButton>
+          <RcButton
+            variant="primary"
+            size="large"
+            :class="{ 'configurable-views-confirm__danger': danger }"
             data-testid="configurable-views-confirm-action"
             @click="answer(true)"
           >
             {{ action }}
-          </button>
+          </RcButton>
         </div>
       </div>
     </template>
@@ -99,6 +101,16 @@ function answer(ok: boolean): void {
     display:         flex;
     justify-content: flex-end;
     width:           100%;
+  }
+
+  // The shell's destructive look. RcButton has no variant for it, so the same colours as `bg-error`
+  &__danger.rc-button.variant-primary {
+    &,
+    &:hover,
+    &:focus {
+      background: var(--error);
+      color:      var(--error-text);
+    }
   }
 }
 </style>

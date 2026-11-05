@@ -2,6 +2,8 @@
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { computed, onBeforeUnmount, ref } from 'vue';
+import Tabbed from '@shell/components/Tabbed/index.vue';
+import Tab from '@shell/components/Tabbed/Tab.vue';
 import WidgetGrid from '../WidgetGrid.vue';
 import { DEFAULT_GAP } from '../../templating/view-model';
 import { useViewEditor } from '../../composables/viewEditor';
@@ -15,9 +17,7 @@ import type { WidgetSpec, WidgetTab } from '../../templating/types';
 // drop into a tab, drag out of one, select and size what is in it - so there is no second editor to
 // learn. Tabs are named, added and ordered in the widget's settings.
 //
-// It draws the tab strip the way the shell's Tabbed does (the cluster dashboard's Events tabs), not
-// through Tabbed itself: Tabbed owns the URL hash and its tabs register as child components, and
-// neither fits a strip whose tabs are data that changes while you edit it.
+// The strip is the shell's Tabbed, as the cluster dashboard's Events tabs are, without the URL hash.
 
 // Dragging something over a tab's name opens that tab after this long, so a widget can be dropped
 // into a tab that is not the one showing.
@@ -34,55 +34,46 @@ const store = useStore();
 const { t } = useI18n(store);
 const viewEditor = useViewEditor();
 
+const tabbed = ref<{ select(name: string): void } | null>(null);
+
 const { tabPresent } = useWidgetPresence();
 
 // Outside the editor a tab with nothing to show here is left out, as the dashboard leaves out its
 // Alerts tab on a cluster without monitoring. While editing, every tab is there to be filled.
 const tabs = computed<WidgetTab[]>(() => (props.widget.tabs || []).filter((tab) => viewEditor.editing || tabPresent(tab.widgets.map((w) => w.widget))));
 const chosenId = ref('');
-// The chosen tab, or the first when it has been removed (or none has been chosen yet).
-const active = computed<WidgetTab | null>(() => tabs.value.find((t) => t.id === chosenId.value) || tabs.value[0] || null);
 
-const tabEls = ref<HTMLElement[]>([]);
+let hoverTab = '';
 let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
-function choose(id: string): void {
-  chosenId.value = id;
-}
-
-/** Arrow keys move between tabs, Home and End jump to the ends - the tablist pattern Tabbed follows. */
-function step(to: number | 'first' | 'last'): void {
-  const list = tabs.value;
-  const at = list.findIndex((t) => t.id === active.value?.id);
-  let next = at;
-
-  if (to === 'first') {
-    next = 0;
-  } else if (to === 'last') {
-    next = list.length - 1;
-  } else {
-    next = (at + to + list.length) % list.length;
-  }
-
-  if (list[next]) {
-    choose(list[next].id);
-    tabEls.value[next]?.focus();
-  }
-}
-
 function cancelHover(): void {
+  hoverTab = '';
+
   if (hoverTimer) {
     clearTimeout(hoverTimer);
     hoverTimer = null;
   }
 }
 
-function onTabDragEnter(id: string): void {
-  if (!viewEditor.editing || id === active.value?.id) {
+/**
+ * Over a tab's name, while something is being dragged. Tabbed has no such thing, so the strip's own
+ * markup says which tab it is: each one is a `tab` link in an item that has its name.
+ */
+function onDragOver(ev: DragEvent): void {
+  const link = (ev.target as Element | null)?.closest?.('a[role="tab"]');
+  const name = (link?.parentElement as HTMLElement | null)?.dataset.testid || '';
+  const id = tabs.value.some((tab) => tab.id === name) ? name : '';
+
+  if (id === hoverTab) {
     return;
   }
+
   cancelHover();
-  hoverTimer = setTimeout(() => choose(id), OPEN_ON_HOVER_MS);
+  hoverTab = id;
+
+  if (viewEditor.editing && id && id !== chosenId.value) {
+    hoverTimer = setTimeout(() => tabbed.value?.select(id), OPEN_ON_HOVER_MS);
+  }
 }
 
 onBeforeUnmount(cancelHover);
@@ -97,71 +88,53 @@ onBeforeUnmount(cancelHover);
       {{ widget.title }}
     </h3>
 
-    <ul
-      class="wtabs__list"
-      role="tablist"
-      :aria-label="widget.title || t('configurableViews.widget.tabs.label')"
+    <Tabbed
+      ref="tabbed"
+      class="wtabs__tabbed"
+      :use-hash="false"
+      :show-extension-tabs="false"
+      :flat="true"
+      @changed="chosenId = $event.selectedName"
+      @dragover="onDragOver"
+      @dragleave="cancelHover"
+      @drop="cancelHover"
     >
-      <li
-        v-for="tab in tabs"
+      <!-- First on the strip is the heaviest. No count of a table's rows: `badge` says how many widgets. -->
+      <Tab
+        v-for="(tab, i) in tabs"
         :key="tab.id"
-        class="wtabs__tab"
-        :class="{ 'wtabs__tab--active': tab.id === active?.id }"
-        role="presentation"
+        :name="tab.id"
+        :label="tab.name"
+        :weight="tabs.length - i"
+        :count="false"
+        :badge="viewEditor.editing ? tab.widgets.length : 0"
       >
-        <a
-          ref="tabEls"
-          role="tab"
-          :aria-selected="tab.id === active?.id"
-          :tabindex="tab.id === active?.id ? 0 : -1"
-          @click.prevent="choose(tab.id)"
-          @keydown.enter.prevent="choose(tab.id)"
-          @keydown.space.prevent="choose(tab.id)"
-          @keydown.right.prevent="step(1)"
-          @keydown.left.prevent="step(-1)"
-          @keydown.home.prevent="step('first')"
-          @keydown.end.prevent="step('last')"
-          @dragenter="onTabDragEnter(tab.id)"
-          @dragleave="cancelHover"
-          @drop="cancelHover"
-        >
-          <span>{{ tab.name }}</span>
-          <span
-            v-if="viewEditor.editing"
-            class="wtabs__count"
-            :title="t('configurableViews.widget.tabs.count', { count: tab.widgets.length })"
-          >{{ tab.widgets.length }}</span>
-        </a>
-      </li>
-    </ul>
-
-    <div
-      v-if="active"
-      class="wtabs__panel"
-      role="tabpanel"
-      :aria-label="active.name"
-    >
-      <WidgetGrid
-        :key="active.id"
-        :widgets="active.widgets"
-        :editing="viewEditor.editing"
-        :selected-id="viewEditor.selectedId"
-        :gap="gap"
-        :place="{ parentId: nodeId, tabId: active.id }"
-      />
-      <p
-        v-if="!viewEditor.editing && !active.widgets.length"
-        class="wtabs__empty"
-      >
-        {{ t('configurableViews.widget.tabs.empty') }}
-      </p>
-    </div>
+        <template #default="{ active }">
+          <div
+            v-if="active"
+            class="wtabs__panel"
+          >
+            <WidgetGrid
+              :widgets="tab.widgets"
+              :editing="viewEditor.editing"
+              :selected-id="viewEditor.selectedId"
+              :gap="gap"
+              :place="{ parentId: nodeId, tabId: tab.id }"
+            />
+            <p
+              v-if="!viewEditor.editing && !tab.widgets.length"
+              class="wtabs__empty"
+            >
+              {{ t('configurableViews.widget.tabs.empty') }}
+            </p>
+          </div>
+        </template>
+      </Tab>
+    </Tabbed>
   </div>
 </template>
 
 <style lang="scss" scoped>
-// The shell's horizontal Tabbed, measure for measure: a bordered strip of 10/15-padded links, the
-// active one in --active over a 2px rule, then a bordered panel.
 .wtabs {
   display:        flex;
   flex-direction: column;
@@ -175,65 +148,24 @@ onBeforeUnmount(cancelHover);
     margin:      0 0 12px;
   }
 
-  &__list {
-    border:        1px solid var(--border);
-    border-bottom: 0;
-    display:       flex;
-    flex-wrap:     wrap;
-    list-style:    none;
-    margin:        0;
-    padding:       0;
-  }
+  // A widget of a set height keeps the strip, and the panel takes the rest. The shell's tabs are as wide
+  // as what is in them; a widget is as wide as its column.
+  & &__tabbed {
+    display:        flex;
+    flex:           1 1 auto;
+    flex-direction: column;
+    min-height:     0;
+    min-width:      0;
 
-  &__tab {
-    padding: 0 4px;
-
-    a {
-      align-items: center;
-      color:       var(--link);
-      cursor:      pointer;
-      display:     flex;
-      gap:         6px;
-      padding:     10px 15px;
-
-      &:hover {
-        text-decoration: none;
-
-        span:first-child {
-          text-decoration: underline;
-        }
-      }
-
-      &:focus-visible {
-        outline:        2px solid var(--primary-keyboard-focus);
-        outline-offset: -2px;
-      }
+    :deep(.tab-container) {
+      flex:       1 1 auto;
+      min-height: 0;
     }
-
-    &--active {
-      border-bottom: 2px solid var(--active, var(--primary));
-
-      a {
-        color: var(--active, var(--primary));
-      }
-    }
-  }
-
-  &__count {
-    background:    var(--default);
-    border-radius: 10px;
-    color:         var(--body-text);
-    font-size:     11px;
-    line-height:   1;
-    padding:       3px 6px;
   }
 
   // The widget's own padding is the panel's, so the Spacing presets mean here what they mean on a card.
   &__panel {
-    border:     1px solid var(--border);
-    flex:       1 1 auto;
-    min-height: 0;
-    padding:    var(--wcard-solo-pad, 16px);
+    padding: var(--wcard-solo-pad, 16px);
   }
 
   &__empty {

@@ -4,6 +4,7 @@ import {
 } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
+import { RcButton } from '@components/RcButton';
 import WidgetHost from './widgets/WidgetHost.vue';
 import {
   GRID_COLUMNS, DEFAULT_GAP, cssSize, cssSides, normalizeSides, clampSpan
@@ -377,20 +378,26 @@ function fitHeight(): void {
       <i class="wnode__grip icon icon-menu" />
       <span class="wnode__label">{{ t('configurableViews.widget.dragToMove') }}</span>
       <span class="wnode__bar-gap" />
-      <button
+      <RcButton
+        variant="ghost"
+        size="small"
         class="wnode__btn"
         :title="t('configurableViews.widget.settings')"
+        :aria-label="t('configurableViews.widget.settings')"
         @click.stop="openSettings"
       >
         <i class="icon icon-gear" />
-      </button>
-      <button
+      </RcButton>
+      <RcButton
+        variant="ghost"
+        size="small"
         class="wnode__btn wnode__btn--danger"
         :title="t('configurableViews.widget.remove')"
+        :aria-label="t('configurableViews.widget.remove')"
         @click.stop="viewEditor.remove(node.id)"
       >
         <i class="icon icon-close" />
-      </button>
+      </RcButton>
     </div>
 
     <div class="wnode__content">
@@ -535,17 +542,14 @@ function fitHeight(): void {
     flex: 1 1 auto;
   }
 
-  &__btn {
-    align-items: center;
-    background:  transparent;
-    border:      none;
-    color:       var(--body-text);
-    cursor:      pointer;
-    display:     flex;
-    font-size:   16px;
-    line-height: 1;
-    min-height:  0;
-    padding:     0;
+  &__bar &__btn {
+    --rc-button-padding: 0;
+
+    color: var(--body-text);
+
+    i {
+      font-size: 16px;
+    }
 
     &:hover {
       color: var(--link);

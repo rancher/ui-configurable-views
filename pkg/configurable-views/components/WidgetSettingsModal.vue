@@ -5,6 +5,7 @@ import {
 import { useStore } from 'vuex';
 import { useRoute } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
+import { RcButton } from '@components/RcButton';
 import { MANAGEMENT, SCHEMA } from '@shell/config/types';
 import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
 import { clusterOptions, fetchClusterSchemas, METRICS_DASHBOARDS } from '../templating/widget-data';
@@ -310,14 +311,16 @@ onBeforeUnmount(() => {
           <i class="icon icon-gear" />
           {{ heading }}
         </h3>
-        <button
+        <RcButton
+          variant="ghost"
+          size="small"
           class="wsm__close"
           :title="t('generic.close')"
           :aria-label="t('generic.close')"
           @click="$emit('cancel')"
         >
           <i class="icon icon-close" />
-        </button>
+        </RcButton>
       </header>
 
       <div class="wsm__body">
@@ -486,7 +489,9 @@ onBeforeUnmount(() => {
               class="wsm__field"
               :aria-label="t('configurableViews.widgetSettings.tabName', { index: i + 1 })"
             >
-            <button
+            <RcButton
+              variant="ghost"
+              size="small"
               class="wsm__icon"
               :title="t('configurableViews.widgetSettings.moveLeft')"
               :aria-label="t('configurableViews.widgetSettings.moveLeft')"
@@ -494,8 +499,10 @@ onBeforeUnmount(() => {
               @click="moveTab(i, -1)"
             >
               <i class="icon icon-chevron-left" />
-            </button>
-            <button
+            </RcButton>
+            <RcButton
+              variant="ghost"
+              size="small"
               class="wsm__icon"
               :title="t('configurableViews.widgetSettings.moveRight')"
               :aria-label="t('configurableViews.widgetSettings.moveRight')"
@@ -503,8 +510,10 @@ onBeforeUnmount(() => {
               @click="moveTab(i, 1)"
             >
               <i class="icon icon-chevron-right" />
-            </button>
-            <button
+            </RcButton>
+            <RcButton
+              variant="ghost"
+              size="small"
               class="wsm__icon wsm__icon--danger"
               :title="removeTabLabel(tab.widgets.length)"
               :aria-label="removeTabLabel(tab.widgets.length)"
@@ -512,15 +521,17 @@ onBeforeUnmount(() => {
               @click="removeTab(i)"
             >
               <i class="icon icon-close" />
-            </button>
+            </RcButton>
           </div>
-          <button
-            class="btn btn-sm role-tertiary wsm__add-tab"
+          <RcButton
+            variant="tertiary"
+            size="small"
+            class="wsm__add-tab"
             @click="addTab"
           >
             <i class="icon icon-plus" />
             {{ t('configurableViews.widgetSettings.addTab') }}
-          </button>
+          </RcButton>
           <p class="wsm__hint">
             {{ t('configurableViews.widgetSettings.tabsHint') }}
           </p>
@@ -528,18 +539,18 @@ onBeforeUnmount(() => {
 
 
         <footer class="wsm__foot">
-          <button
-            class="btn btn-sm role-secondary"
+          <RcButton
+            variant="secondary"
             @click="$emit('remove')"
           >
             {{ t('configurableViews.widgetSettings.remove') }}
-          </button>
-          <button
-            class="btn btn-sm role-primary"
+          </RcButton>
+          <RcButton
+            variant="primary"
             @click="$emit('done', draft)"
           >
             {{ t('generic.done') }}
-          </button>
+          </RcButton>
         </footer>
       </div>
     </div>
@@ -598,15 +609,13 @@ onBeforeUnmount(() => {
   }
 
   &__close {
-    background:  transparent;
-    border:      none;
-    color:       var(--body-text);
-    cursor:      pointer;
-    display:     flex;
-    font-size:   16px;
-    line-height: 1;
-    min-height:  0;
-    padding:     0;
+    --rc-button-padding: 0;
+
+    color: var(--body-text);
+
+    i {
+      font-size: 16px;
+    }
 
     &:hover {
       color: var(--link);
@@ -713,18 +722,14 @@ onBeforeUnmount(() => {
   }
 
   &__icon {
-    align-items:     center;
-    background:      transparent;
-    border:          none;
-    color:           var(--body-text);
-    cursor:          pointer;
-    display:         flex;
-    font-size:       16px;
-    height:          24px;
-    justify-content: center;
-    min-height:      0;
-    padding:         0;
-    width:           24px;
+    --rc-button-padding: 0;
+
+    color: var(--body-text);
+    flex:  0 0 24px;
+
+    i {
+      font-size: 16px;
+    }
 
     &:hover:not(:disabled) {
       color: var(--link);
@@ -733,16 +738,18 @@ onBeforeUnmount(() => {
     &--danger:hover:not(:disabled) {
       color: var(--error);
     }
+  }
 
-    &:disabled {
-      cursor:  default;
-      opacity: 0.35;
-    }
+  // Faded, with none of the box the shell puts behind a disabled button
+  &__tabrow &__icon:disabled {
+    background: transparent;
+    color:      var(--body-text);
+    cursor:     default;
+    opacity:    0.35;
   }
 
   &__add-tab {
     align-self: flex-start;
-    gap:        6px;
   }
 
   &__foot {

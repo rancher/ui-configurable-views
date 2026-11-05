@@ -6,6 +6,7 @@ import type { RouteLocationRaw } from 'vue-router';
 import jsyaml from 'js-yaml';
 import Tabbed from '@shell/components/Tabbed/index.vue';
 import Tab from '@shell/components/Tabbed/Tab.vue';
+import { RcButton } from '@components/RcButton';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
 import { MANAGEMENT } from '@shell/config/types';
 import {
@@ -225,13 +226,13 @@ async function saveYaml(): Promise<void> {
             v-if="yamlStatus"
             class="text-success"
           >{{ yamlStatus }}</span>
-          <button
+          <RcButton
             v-if="yamlPage !== page.key"
-            class="btn btn-sm role-secondary"
+            variant="secondary"
             @click="openYaml(page.key)"
           >
             <i class="icon icon-file" /> {{ t('configurableViews.savedViews.editYaml') }}
-          </button>
+          </RcButton>
         </div>
 
         <!-- This page's whole stored config, by hand (templating-home data.<page>). -->
@@ -245,19 +246,19 @@ async function saveYaml(): Promise<void> {
               v-if="yamlError"
               class="text-error"
             >{{ yamlError }}</span>
-            <button
-              class="btn btn-sm role-secondary"
+            <RcButton
+              variant="secondary"
               @click="cancelYaml"
             >
               {{ t('generic.cancel') }}
-            </button>
-            <button
-              class="btn btn-sm role-primary"
+            </RcButton>
+            <RcButton
+              variant="primary"
               :disabled="savingYaml"
               @click="saveYaml"
             >
               {{ savingYaml ? t('configurableViews.bar.saving') : t('configurableViews.bar.save') }}
-            </button>
+            </RcButton>
           </div>
           <textarea
             v-model="yamlDraft"

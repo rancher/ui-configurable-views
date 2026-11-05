@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import {
-  computed, nextTick, onBeforeUnmount, onMounted, ref, watch
+  computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance
 } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { isMac, shortcutLabel } from '@shell/utils/platform';
+import { RcButton } from '@components/RcButton';
 import { RcDropdown, RcDropdownItem, RcDropdownSeparator, RcDropdownTrigger } from '@components/RcDropdown';
 import { useDragReorder } from '../composables/useDragReorder';
 import { isStockView } from '../templating/view-model';
@@ -113,6 +114,9 @@ const keepRef = <T, >(map: Map<string, T>, key: string, el: T | null) => {
     map.delete(key);
   }
 };
+
+/** A tab is a RcButton, and it is the button itself that is focused and scrolled to */
+const keepTabButton = (id: string, button: ComponentPublicInstance | null) => keepRef(tabButtons, id, (button?.$el as HTMLElement | undefined) || null);
 
 const renamingId = ref<string | null>(null);
 
@@ -546,9 +550,10 @@ defineExpose({ openRename, focusTab });
             :distance="4"
             :aria-label="t('configurableViews.bar.moreActions')"
           >
-            <button
-              :ref="(el) => keepRef(tabButtons, view.id, el as HTMLElement | null)"
-              type="button"
+            <rc-button
+              :ref="(el) => keepTabButton(view.id, el as ComponentPublicInstance | null)"
+              variant="ghost"
+              size="small"
               role="tab"
               class="vbar__view"
               :aria-selected="view.id === activeId"
@@ -576,7 +581,7 @@ defineExpose({ openRename, focusTab });
                 />
               </span>
               {{ view.name }}
-            </button>
+            </rc-button>
 
             <rc-dropdown-trigger
               v-if="!editing"
@@ -698,49 +703,52 @@ defineExpose({ openRename, focusTab });
       />
     </div>
 
-    <button
+    <rc-button
       v-if="!editing"
-      type="button"
-      class="btn btn-sm role-link vbar__new"
+      variant="link"
+      class="vbar__new"
       data-testid="configurable-views-new"
       @click="$emit('new-view')"
     >
       <i class="icon icon-plus" />
       {{ t('configurableViews.bar.addView') }}
-    </button>
+    </rc-button>
 
     <template v-if="editing">
       <i class="icon icon-edit vbar__pencil" />
       <span class="vbar__mode">{{ isNew ? t('configurableViews.bar.newView') : t('configurableViews.bar.editing') }}</span>
       <span class="vbar__hint">{{ editingHint }}</span>
 
-      <button
-        class="btn role-secondary vbar__btn"
+      <rc-button
+        variant="secondary"
+        class="vbar__btn"
         @click="$emit('cancel')"
       >
         {{ t('generic.cancel') }}
-      </button>
-      <button
+      </rc-button>
+      <rc-button
         v-if="!isNew"
-        class="btn role-secondary vbar__btn"
+        variant="secondary"
+        class="vbar__btn"
         :disabled="saving"
         @click="$emit('save-as-new')"
       >
         {{ t('configurableViews.bar.saveAsNew') }}
-      </button>
-      <button
-        class="btn role-primary vbar__btn"
+      </rc-button>
+      <rc-button
+        variant="primary"
+        class="vbar__btn"
         :disabled="saving || (!dirty && !isNew)"
         @click="$emit('save')"
       >
         {{ saving ? t('configurableViews.bar.saving') : t('configurableViews.bar.save') }}
-      </button>
+      </rc-button>
 
       <!-- Last, over the drawer it opens and closes: brings back the drawer its ✕ closed, or closes
          it here too, for the whole width -->
-      <button
+      <rc-button
+        :variant="drawerOpen ? 'primary' : 'tertiary'"
         class="vbar__icon-btn"
-        :class="{ 'vbar__icon-btn--on': drawerOpen }"
         :title="drawerOpen ? t('configurableViews.bar.hideEditor') : t('configurableViews.bar.showEditor')"
         :aria-label="drawerOpen ? t('configurableViews.bar.hideEditor') : t('configurableViews.bar.showEditor')"
         :aria-pressed="drawerOpen ? 'true' : 'false'"
@@ -748,7 +756,7 @@ defineExpose({ openRename, focusTab });
         @click="$emit('toggle-drawer')"
       >
         <i class="icon icon-dock" />
-      </button>
+      </rc-button>
     </template>
   </div>
 </template>
@@ -873,7 +881,7 @@ $tab-height: 30px;
 
   // The parts of a view's button: its name, then its chevron, on one line inside the box its menu is
   // placed against.
-  &__view,
+  &__list &__view,
   &__list &__caret {
     background:     transparent;
     border:         0;
@@ -883,34 +891,45 @@ $tab-height: 30px;
     height:         $tab-height;
     min-height:     $tab-height;
     vertical-align: top;
+  }
+
+  // Three classes deep, to win over RcButton's own sizes and looks in every state - at rest as well as
+  // hovered or focused, so its size never changes under the pointer.
+  &__list &__slot &__view {
+    --rc-button-padding: 0 12px;
+
+    font-size:   14px;
+    gap:         6px;
+    line-height: $tab-height;
+
+    // Its chevron finishes the button
+    &:not(:last-child) {
+      --rc-button-padding: 0 4px 0 12px;
+    }
+
+    &:hover,
+    &:focus {
+      background: transparent;
+      color:      inherit;
+    }
+
+    &:focus {
+      outline: none;
+    }
 
     &:focus-visible {
       outline:        2px solid var(--primary-keyboard-focus);
       outline-offset: -2px;
     }
-  }
-
-  &__view {
-    align-items:   center;
-    display:       inline-flex;
-    font-size:     14px;
-    gap:           6px;
-    line-height:   $tab-height;
-    padding:       0 12px;
-
-    // Its chevron finishes the button
-    &:not(:last-child) {
-      padding-right: 4px;
-    }
 
     &:disabled {
-      color:  var(--muted);
-      cursor: default;
+      background: transparent;
+      color:      var(--muted);
+      cursor:     default;
     }
   }
 
-  // Three classes deep, to win over the dropdown trigger's own button look in every state - at rest
-  // as well as hovered or focused, so its size never changes under the pointer.
+  // The same, for the dropdown trigger.
   &__list &__slot &__caret {
     background: transparent;
     color:      inherit;
@@ -1016,49 +1035,21 @@ $tab-height: 30px;
     white-space:   nowrap;
   }
 
-  // 32px, said three ways: the shell's global .btn rule is 40 tall with a 40px line-height.
   &__btn {
-    flex:        0 0 auto;
-    height:      32px;
-    line-height: 1;
-    min-height:  32px;
-    min-width:   0;
-    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   // ---- icon buttons ----
-  // 38x32, in the accent style the design draws them in: the drawer's toggle while editing.
+  // 38x32: the drawer's toggle while editing.
   &__icon-btn {
-    align-items:     center;
-    background:      color-mix(in srgb, var(--primary) 12%, transparent);
-    border:          1px solid var(--primary);
-    border-radius:   4px;
-    color:           var(--primary);
-    cursor:          pointer;
-    display:         flex;
-    flex:            0 0 auto;
-    height:          32px;
-    justify-content: center;
-    line-height:     1;
-    min-height:      32px;
-    padding:         0;
-    width:           38px;
+    --rc-button-padding: 0;
 
-    &:hover:not(:disabled),
-    &--on,
-    &[aria-expanded="true"] {
-      background: var(--primary);
-      color:      var(--primary-text);
-    }
-
-    i {
-      font-size: 14px;
-    }
+    flex:  0 0 auto;
+    width: 38px;
   }
 
   &__new {
     flex:   0 0 auto;
-    gap:    6px;
     margin: 0 0 0 8px;
   }
 }
