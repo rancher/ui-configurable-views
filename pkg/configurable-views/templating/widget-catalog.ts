@@ -46,21 +46,6 @@ export const WIDGET_METRICS: WidgetKind = 'clusterMetrics';
 export const WIDGET_EXTENSION_CARDS: WidgetKind = 'clusterExtensionCards';
 
 /**
- * The kinds that are ABOUT one cluster - the pieces of a cluster's dashboard.
- *
- * Each shows the cluster it names, or the page's when it names none (see useWidgetCluster), so the
- * settings ask for a cluster for these and for nothing else of theirs.
- */
-const CLUSTER_WIDGETS: WidgetKind[] = [
-  WIDGET_CLUSTER_HEADER, WIDGET_RESOURCE_CARDS, WIDGET_CAPACITY, WIDGET_COMPONENT_STATUS, WIDGET_OVERVIEW, WIDGET_EVENTS,
-  WIDGET_CERTIFICATES, WIDGET_ALERTS, WIDGET_METRICS, WIDGET_EXTENSION_CARDS
-];
-
-export function isClusterWidget(kind: string): boolean {
-  return (CLUSTER_WIDGETS as string[]).includes(kind);
-}
-
-/**
  * The resource a fresh building block starts on: clusters, which every Rancher install has, of the
  * type Rancher lists them by (the Home's cluster list, the side bar).
  */

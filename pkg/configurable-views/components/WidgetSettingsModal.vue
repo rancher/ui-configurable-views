@@ -3,21 +3,14 @@ import {
   computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type CSSProperties
 } from 'vue';
 import { useStore } from 'vuex';
-import { useRoute } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcButton } from '@components/RcButton';
-import { MANAGEMENT, SCHEMA } from '@shell/config/types';
-import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
-import { clusterOptions, fetchClusterSchemas, METRICS_DASHBOARDS } from '../templating/widget-data';
-import { newId } from '../templating/view-model';
-import { typeOptions, type TypeOption, type TypeSchema } from '../templating/resource-types';
-import {
-  blockLabelKey, isClusterWidget, WIDGET_TABLE, WIDGET_LINKS, WIDGET_BANNER, WIDGET_CLUSTER_TABLE, WIDGET_OVERVIEW,
-  WIDGET_TABS
-} from '../templating/widget-catalog';
-import { pageClusterOf } from '../composables/useWidgetCluster';
+import { MANAGEMENT } from '@shell/config/types';
+import { clusterOptions } from '../templating/widget-data';
+import { blockLabelKey } from '../templating/widget-catalog';
+import { WIDGETS } from './widgets/registry';
 import type { SettingsAnchor } from '../composables/viewEditor';
-import type { WidgetLink, WidgetSpec } from '../templating/types';
+import type { WidgetSpec } from '../templating/types';
 
 // "What this widget shows" — the settings behind a widget's ⚙.
 //
@@ -25,19 +18,12 @@ import type { WidgetLink, WidgetSpec } from '../templating/types';
 // because the thing you are describing is right there and you want to keep seeing it. A centred
 // modal over a dimmed page would hide exactly what you are configuring.
 //
-// It edits a COPY and only hands it back on Done, so Cancel really does leave the widget alone. The
-// fields shown depend on the building block: a table needs where it reads from - Rancher, or a
-// cluster - and a resource there, and how much of the table views it shows - its columns, sort and filter
-// are set in the table itself; a links box needs links; a cluster widget needs only its cluster; a
-// Tabs widget needs its tabs.
-
-// Building blocks with plural names, where "what this <name> shows" does not read.
-const PLURAL_KINDS = [WIDGET_LINKS, WIDGET_TABS];
+// It edits a COPY and only hands it back on Done, so Cancel really does leave the widget alone. This
+// holds what every widget shares: the title, and where it reads from, if it reads from anywhere. What
+// else a kind needs is its own (see WIDGETS), drawn under those.
 
 const DIALOG_WIDTH = 400;
 const MARGIN = 12;
-
-/** One tickable column: an id, how it is labelled, and whether it can be sorted by. */
 
 const props = withDefaults(defineProps<{
   widget: WidgetSpec;
@@ -61,6 +47,7 @@ const dialog = ref<HTMLElement | null>(null);
 // Measured after mount: the dialog can only be placed well if we know how tall it really is.
 const dialogHeight = ref(0);
 const draft = reactive<WidgetSpec>(JSON.parse(JSON.stringify(props.widget)));
+const definition = computed(() => WIDGETS[draft.kind]);
 
 /**
  * Sit against the widget's left edge, and ALWAYS fully on screen.
@@ -95,20 +82,11 @@ const heading = computed(() => {
   const key = blockLabelKey(draft.kind);
   const name = key ? t(key) : draft.kind;
 
-  return PLURAL_KINDS.includes(draft.kind) ? t('configurableViews.widgetSettings.headingPlural', { title: draft.title || name }) : t('configurableViews.widgetSettings.heading', { title: draft.title || name, what: name.toLowerCase() });
+  return definition.value?.pluralName ? t('configurableViews.widgetSettings.headingPlural', { title: draft.title || name }) : t('configurableViews.widgetSettings.heading', { title: draft.title || name, what: name.toLowerCase() });
 });
 
-// Which sections apply to this building block.
-const readsData = computed(() => ![WIDGET_LINKS, WIDGET_BANNER, WIDGET_CLUSTER_TABLE, WIDGET_OVERVIEW, WIDGET_TABS].includes(draft.kind) && !isClusterWidget(draft.kind));
-
-// The Home cluster table is the stock Home's own table — its columns, sorting and actions are fixed
-// there, so there is nothing here to change but the heading.
-const titleOnly = computed(() => draft.kind === WIDGET_CLUSTER_TABLE);
-
-const isTable = computed(() => draft.kind === WIDGET_TABLE);
-
 /**
- * Where a table reads from, and which cluster a cluster widget shows - one field.
+ * Where a widget reads from - one field.
  *
  * A table reads Rancher's own API (its clusters, users and Fleet, and the local cluster's resources),
  * or one cluster's: picking a cluster is what makes it a table of that cluster. A cluster widget is
@@ -117,7 +95,8 @@ const isTable = computed(() => draft.kind === WIDGET_TABLE);
  * ONE cluster, not several: each is a separate API with its own paging, so a widget spanning two of
  * them could not be paged at all. One cluster is what makes a table a real table.
  */
-const needsClusters = computed(() => isTable.value || isClusterWidget(draft.kind));
+const needsClusters = computed(() => !!definition.value?.source);
+const offersRancher = computed(() => definition.value?.source === 'rancherOrCluster');
 
 const clusters = computed(() => clusterOptions(store.getters));
 
@@ -125,118 +104,14 @@ const clusters = computed(() => clusterOptions(store.getters));
 const RANCHER = ':rancher';
 
 const where = computed({
-  get: () => (isTable.value && !draft.fromCluster ? RANCHER : draft.cluster),
+  get: () => (offersRancher.value && !draft.fromCluster ? RANCHER : draft.cluster),
   set: (value: string) => {
-    if (isTable.value) {
+    if (offersRancher.value) {
       draft.fromCluster = value !== RANCHER;
     }
     draft.cluster = value === RANCHER ? '' : value;
   },
 });
-
-// ---- the Resource picker: every type where the table reads ----
-
-const route = useRoute();
-const typeSchemas = ref<TypeSchema[]>([]);
-const loadingTypes = ref(false);
-
-/**
- * The schemas of where the table reads: Rancher's, or its cluster's.
- *
- * A table following the page on the Home has no cluster yet, so it is offered the local cluster's
- * types - the Kubernetes ones are the same everywhere. A type only another cluster has can be typed.
- */
-const typesFrom = computed(() => (draft.fromCluster ? draft.cluster || pageClusterOf(route) : ''));
-
-let typesAsked = 0;
-
-watch([readsData, typesFrom], async([reads, cluster]) => {
-  if (!reads) {
-    return;
-  }
-
-  const asked = ++typesAsked;
-  const local = () => store.getters['management/all'](SCHEMA) as TypeSchema[];
-
-  if (!cluster) {
-    typeSchemas.value = local();
-
-    return;
-  }
-
-  loadingTypes.value = true;
-
-  try {
-    const schemas = await fetchClusterSchemas(store, cluster);
-
-    if (asked === typesAsked) {
-      typeSchemas.value = schemas;
-    }
-  } catch {
-    if (asked === typesAsked) {
-      typeSchemas.value = local();
-    }
-  } finally {
-    if (asked === typesAsked) {
-      loadingTypes.value = false;
-    }
-  }
-}, { immediate: true });
-
-const resourceOptions = computed(() => typeOptions(typeSchemas.value, draft.resource));
-
-/**
- * A picked entry is its type; one typed in is the text itself, which the select hands back as a
- * `{ label }` of its own making, with no value.
- */
-const typeOf = (option: Partial<TypeOption> | string): string => (typeof option === 'string' ? option : option.value ?? option.label ?? '');
-
-// One link per line, "Label https://url" - the URL is whatever follows the last space.
-const linksText = computed({
-  get: () => (draft.links || []).map((l) => `${ l.label } ${ l.url }`).join('\n'),
-  set: (value: string) => {
-    draft.links = `${ value }`.split('\n').map((line): WidgetLink | null => {
-      const at = line.trim().lastIndexOf(' ');
-
-      return at < 0 ? null : { label: line.trim().slice(0, at).trim(), url: line.trim().slice(at + 1).trim() };
-    }).filter((l): l is WidgetLink => !!l && !!l.label && !!l.url);
-  },
-});
-
-// ---- a Tabs widget's tabs ----
-// Only the tabs themselves are edited here - their names and order. What is IN a tab is edited on
-// the view, where it is drawn.
-
-function addTab(): void {
-  const tabs = draft.tabs || [];
-
-  draft.tabs = [...tabs, {
-    id: newId('tab'), name: t('configurableViews.widgetSettings.newTab', { index: tabs.length + 1 }), widgets: []
-  }];
-}
-
-function moveTab(index: number, delta: number): void {
-  const tabs = [...(draft.tabs || [])];
-  const to = index + delta;
-
-  if (to < 0 || to >= tabs.length) {
-    return;
-  }
-
-  const [moved] = tabs.splice(index, 1);
-
-  tabs.splice(to, 0, moved);
-  draft.tabs = tabs;
-}
-
-/** A tab goes with what is in it; the button says so before it is pressed, and Cancel still undoes it. */
-function removeTab(index: number): void {
-  draft.tabs = (draft.tabs || []).filter((_, i) => i !== index);
-}
-
-function removeTabLabel(count: number): string {
-  return count ? t('configurableViews.widgetSettings.removeTabWith', { count }) : t('configurableViews.widgetSettings.removeTab');
-}
 
 /**
  * Load the clusters the picker offers, the moment it is shown.
@@ -330,10 +205,10 @@ onBeforeUnmount(() => {
           class="wsm__field"
         >
         <p
-          v-if="titleOnly"
+          v-if="definition?.settingsHintKey"
           class="wsm__hint"
         >
-          {{ t('configurableViews.widgetSettings.clusterTableHint') }}
+          {{ t(definition.settingsHintKey) }}
         </p>
 
         <template v-if="needsClusters">
@@ -344,7 +219,7 @@ onBeforeUnmount(() => {
             data-testid="configurable-views-widget-cluster"
           >
             <option
-              v-if="isTable"
+              v-if="offersRancher"
               :value="RANCHER"
             >
               {{ t('configurableViews.widgetSettings.rancher') }}
@@ -361,182 +236,16 @@ onBeforeUnmount(() => {
             </option>
           </select>
           <p class="wsm__hint">
-            {{ t(isTable ? 'configurableViews.widgetSettings.tableClusterHint' : 'configurableViews.widgetSettings.clusterHint') }}
+            {{ t(offersRancher ? 'configurableViews.widgetSettings.tableClusterHint' : 'configurableViews.widgetSettings.clusterHint') }}
           </p>
         </template>
 
-        <template v-if="readsData">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.resource') }}</label>
-          <LabeledSelect
-            v-model:value="draft.resource"
-            class="wsm__select"
-            :options="resourceOptions"
-            :loading="loadingTypes"
-            :searchable="true"
-            :taggable="true"
-            :clearable="false"
-            :reduce="typeOf"
-            data-testid="configurable-views-widget-resource"
-          />
-          <p class="wsm__hint">
-            {{ t('configurableViews.widgetSettings.resourceHint') }}
-          </p>
-        </template>
-
-        <!-- Columns, sort, filter and grouping are the table views', set in the table itself -->
-        <template v-if="isTable">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.views') }}</label>
-          <label class="wsm__radio">
-            <input
-              v-model="draft.viewTabs"
-              type="checkbox"
-              data-testid="configurable-views-table-view-tabs"
-            >
-            {{ t('configurableViews.widgetSettings.viewTabs') }}
-          </label>
-          <label class="wsm__radio">
-            <input
-              v-model="draft.ownViews"
-              type="checkbox"
-              :disabled="!draft.viewTabs"
-              data-testid="configurable-views-table-own-views"
-            >
-            {{ t('configurableViews.widgetSettings.ownViews') }}
-          </label>
-          <p class="wsm__hint">
-            {{ t('configurableViews.widgetSettings.viewsHint') }}
-          </p>
-        </template>
-
-        <template v-if="draft.kind === 'links'">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.show') }}</label>
-          <label class="wsm__radio">
-            <input
-              v-model="draft.source"
-              type="radio"
-              value="home"
-            >
-            {{ t('configurableViews.widgetSettings.linksHome') }}
-          </label>
-          <label class="wsm__radio">
-            <input
-              v-model="draft.source"
-              type="radio"
-              value="custom"
-            >
-            {{ t('configurableViews.widgetSettings.linksCustom') }}
-          </label>
-          <p class="wsm__hint">
-            {{ t('configurableViews.widgetSettings.linksHomeHint') }}
-          </p>
-
-          <template v-if="draft.source === 'custom'">
-            <label class="wsm__label">{{ t('configurableViews.widgetSettings.links') }}</label>
-            <textarea
-              v-model="linksText"
-              class="wsm__field wsm__field--area"
-              rows="6"
-              placeholder="Runbook https://wiki.example.com/runbook"
-            />
-            <p class="wsm__hint">
-              {{ t('configurableViews.widgetSettings.linksHint') }}
-            </p>
-          </template>
-        </template>
-
-        <template v-if="draft.kind === 'banner'">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.subtitle') }}</label>
-          <input
-            v-model="draft.subtitle"
-            class="wsm__field"
-          >
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.image') }}</label>
-          <input
-            v-model="draft.image"
-            class="wsm__field"
-            :placeholder="t('configurableViews.widgetSettings.imagePlaceholder')"
-          >
-        </template>
-
-        <template v-if="draft.kind === 'clusterMetrics'">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.dashboard') }}</label>
-          <select
-            v-model="draft.metrics"
-            class="wsm__field"
-          >
-            <option
-              v-for="(board, id) in METRICS_DASHBOARDS"
-              :key="id"
-              :value="id"
-            >
-              {{ t(board.labelKey) }}
-            </option>
-          </select>
-          <p class="wsm__hint">
-            {{ t('configurableViews.widgetSettings.dashboardHint') }}
-          </p>
-        </template>
-
-        <template v-if="draft.kind === 'tabs'">
-          <label class="wsm__label">{{ t('configurableViews.widgetSettings.tabs') }}</label>
-          <div
-            v-for="(tab, i) in draft.tabs"
-            :key="tab.id"
-            class="wsm__tabrow"
-          >
-            <input
-              v-model="tab.name"
-              class="wsm__field"
-              :aria-label="t('configurableViews.widgetSettings.tabName', { index: i + 1 })"
-            >
-            <RcButton
-              variant="ghost"
-              size="small"
-              class="wsm__icon"
-              :title="t('configurableViews.widgetSettings.moveLeft')"
-              :aria-label="t('configurableViews.widgetSettings.moveLeft')"
-              :disabled="i === 0"
-              @click="moveTab(i, -1)"
-            >
-              <i class="icon icon-chevron-left" />
-            </RcButton>
-            <RcButton
-              variant="ghost"
-              size="small"
-              class="wsm__icon"
-              :title="t('configurableViews.widgetSettings.moveRight')"
-              :aria-label="t('configurableViews.widgetSettings.moveRight')"
-              :disabled="i === (draft.tabs || []).length - 1"
-              @click="moveTab(i, 1)"
-            >
-              <i class="icon icon-chevron-right" />
-            </RcButton>
-            <RcButton
-              variant="ghost"
-              size="small"
-              class="wsm__icon wsm__icon--danger"
-              :title="removeTabLabel(tab.widgets.length)"
-              :aria-label="removeTabLabel(tab.widgets.length)"
-              :disabled="(draft.tabs || []).length < 2"
-              @click="removeTab(i)"
-            >
-              <i class="icon icon-close" />
-            </RcButton>
-          </div>
-          <RcButton
-            variant="tertiary"
-            size="small"
-            class="wsm__add-tab"
-            @click="addTab"
-          >
-            <i class="icon icon-plus" />
-            {{ t('configurableViews.widgetSettings.addTab') }}
-          </RcButton>
-          <p class="wsm__hint">
-            {{ t('configurableViews.widgetSettings.tabsHint') }}
-          </p>
-        </template>
-
+        <component
+          :is="definition.settings"
+          v-if="definition?.settings"
+          :widget="draft"
+          @update="Object.assign(draft, $event)"
+        />
 
         <footer class="wsm__foot">
           <RcButton
@@ -636,6 +345,25 @@ onBeforeUnmount(() => {
     }
   }
 
+  &__foot {
+    border-top:      1px solid var(--border);
+    display:         flex;
+    gap:             12px;
+    justify-content: flex-end;
+    margin-top:      6px;
+    padding-top:     12px;
+  }
+}
+
+// The shell's app header is a stacking context at z-index 14, and the user menu, the notification
+// tray and every other header dropdown live INSIDE it. So anything on the page at 14 or above does
+// not merely sit beside them — it covers the whole header, menus and all. Page chrome stays below
+// that ceiling; it only ever needs to beat the page, never the app.
+</style>
+
+<style lang="scss">
+// What each kind's own settings share (see components/widgets/settings), which is why it is not scoped.
+.wsm {
   // A field's label sits 6px above its control; the 8px between FIELDS comes from the body's gap.
   &__label {
     color:         var(--muted);
@@ -665,11 +393,6 @@ onBeforeUnmount(() => {
     }
   }
 
-  // The Resource picker: the shell's searchable select, across the dialog like the fields around it
-  &__select {
-    width: 100%;
-  }
-
   &__hint {
     color:       var(--muted);
     font-size:   12px;
@@ -684,86 +407,5 @@ onBeforeUnmount(() => {
     gap:         8px;
     line-height: 17px;
   }
-
-  // Three across, as the design lays the column checkboxes out.
-  &__columns {
-    display:               grid;
-    gap:                   4px 12px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-
-    // Destination names are sentences, not single words.
-    &--wide {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    label {
-      align-items: center;
-      display:     flex;
-      font-size:   14px;
-      gap:         6px;
-    }
-  }
-
-  &__pair {
-    display:               grid;
-    gap:                   8px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  // One row per tab: its name, then move left / right and remove.
-  &__tabrow {
-    align-items: center;
-    display:     flex;
-    gap:         4px;
-
-    .wsm__field {
-      flex: 1 1 auto;
-    }
-  }
-
-  &__icon {
-    --rc-button-padding: 0;
-
-    color: var(--body-text);
-    flex:  0 0 24px;
-
-    i {
-      font-size: 16px;
-    }
-
-    &:hover:not(:disabled) {
-      color: var(--link);
-    }
-
-    &--danger:hover:not(:disabled) {
-      color: var(--error);
-    }
-  }
-
-  // Faded, with none of the box the shell puts behind a disabled button
-  &__tabrow &__icon:disabled {
-    background: transparent;
-    color:      var(--body-text);
-    cursor:     default;
-    opacity:    0.35;
-  }
-
-  &__add-tab {
-    align-self: flex-start;
-  }
-
-  &__foot {
-    border-top:      1px solid var(--border);
-    display:         flex;
-    gap:             12px;
-    justify-content: flex-end;
-    margin-top:      6px;
-    padding-top:     12px;
-  }
 }
-
-// The shell's app header is a stacking context at z-index 14, and the user menu, the notification
-// tray and every other header dropdown live INSIDE it. So anything on the page at 14 or above does
-// not merely sit beside them — it covers the whole header, menus and all. Page chrome stays below
-// that ceiling; it only ever needs to beat the page, never the app.
 </style>
