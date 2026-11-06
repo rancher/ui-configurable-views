@@ -15,11 +15,11 @@ interface HeaderContext {
   $shell: ShellApi;
 }
 
-// The kill switch's shortcut, Cmd/Ctrl + Shift + . - a header action with no button, on every page.
+// The on/off switch's shortcut, Cmd/Ctrl + Shift + . - a header action with no button, on every page.
 // The shell binds a shortcut by the character the browser reports, which differs by platform: on a Mac
 // Cmd is held, and the key comes through unshifted ('.'); elsewhere Shift applies, and Shift + . is
 // '>' on US and UK keyboards.
-const killSwitch: Action = {
+const toggleViews: Action = {
   labelKey: 'configurableViews.toggle.title',
   hidden:   true,
   shortcut: { windows: ['ctrl', 'shift', '>'], mac: ['meta', 'shift', '.'] },
@@ -69,10 +69,12 @@ export default function(plugin: IPlugin): void {
     // While a view is being edited the bar holds the way out of the editor, so the button is
     // disabled, and its tooltip says why. Read reactively by the header, and again at every click
     enabled:            () => !viewBarLocked.value,
-    invoke:             () => toggleViewBar(),
+    invoke(this: HeaderContext) {
+      toggleViewBar(this.$store);
+    },
   };
 
-  plugin.addAction(ActionLocation.HEADER, {}, killSwitch);
+  plugin.addAction(ActionLocation.HEADER, {}, toggleViews);
   plugin.addAction(ActionLocation.HEADER, { product: ['home'] }, toggleBar);
   plugin.addAction(ActionLocation.HEADER, { product: ['explorer'], path: [{ urlPath: '/explorer', endsWith: true }] }, toggleBar);
 }

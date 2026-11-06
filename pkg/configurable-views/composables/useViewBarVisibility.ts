@@ -1,35 +1,27 @@
 import { ref } from 'vue';
-
-/** Per browser: whether the bar shows is a matter of taste, not something to sync between people. */
-const STORAGE_KEY = 'configurable-views-bar-visible';
-
-function read(): boolean {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
+import type { VuexStore } from '@shell/types/store/vuex';
+import { PREF_BAR_VISIBLE, savePref } from '../templating/user-prefs';
 
 /**
  * Whether the view bar shows. Hidden until asked for, through the header button or its shortcut -
  * shared by both, so the button's pressed state follows the shortcut.
  */
-export const viewBarVisible = ref(read());
+export const viewBarVisible = ref(false);
 
 /** A view is being edited. The bar is the way out of the editor then, so it can't be hidden. */
 export const viewBarLocked = ref(false);
 
-export function toggleViewBar(): void {
+/** What the person last chose, which the shell has read by the time a page is drawn. */
+export function loadViewBar(store: VuexStore): void {
+  viewBarVisible.value = store.getters['prefs/get'](PREF_BAR_VISIBLE) === true;
+}
+
+export function toggleViewBar(store: VuexStore): void {
   if (viewBarLocked.value) {
     return;
   }
 
   viewBarVisible.value = !viewBarVisible.value;
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, String(viewBarVisible.value));
-  } catch {
-    // Kept for this page load only
-  }
+  // If it can't be saved, the choice holds for this page load only.
+  savePref(store, PREF_BAR_VISIBLE, viewBarVisible.value).catch(() => undefined);
 }

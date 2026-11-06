@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { useShell } from '@shell/apis';
 import { NotificationLevel } from '@shell/types/notifications';
 import { Checkbox } from '@components/Form/Checkbox';
-import { isTemplatingEnabled, toggleTemplating, fetchTemplatingConfigMaps } from '../templating/template-engine';
+import { isTemplatingEnabled, toggleTemplating } from '../templating/template-engine';
+import { definePrefs } from '../templating/user-prefs';
 
-// Configurable Views settings — the global kill switch for the configurable pages. Always reachable
-// (even when off) so the feature can be turned back on.
+// Configurable Views settings — each person's own on/off switch for the configurable pages. Always
+// reachable (even when off) so they can be turned back on.
 
 const store = useStore();
 const { t } = useI18n(store);
 const shell = useShell();
 
+definePrefs(store);
+
 const toggling = ref(false);
 
 const enabled = computed(() => isTemplatingEnabled(store.getters));
-
-onMounted(() => fetchTemplatingConfigMaps(store));
 
 async function onToggle(value: boolean): Promise<void> {
   if (toggling.value) {

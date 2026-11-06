@@ -5,6 +5,7 @@ import type { I18n } from '@shell/composables/useI18n';
 import {
   isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, type PageKey
 } from '../templating/template-engine';
+import { definePrefs } from '../templating/user-prefs';
 import {
   DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews
 } from '../templating/view-model';
@@ -35,14 +36,15 @@ export function viewContent(view: View): string {
  * so each of those can be a composable of its own over the same views. Includes the editor's own
  * state (the draft, the selected widget, the drawer), because opening another view resets it.
  *
- * WHERE VIEWS LIVE. Your views are saved to YOUR account; the ones an admin publishes live in the
- * organization's scope and appear in the same bar. Editing one of those does not change what everyone
+ * WHERE VIEWS LIVE. Your views are saved in YOUR user preferences; the ones an admin publishes live in
+ * the organization's scope and appear in the same bar. Editing one of those does not change what everyone
  * else sees: it forks the view into your account first.
  */
 export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n['t']) {
+  definePrefs(store);
+
   // ---- state ----
 
-  const userId = ref<string | null>(null);
   const loaded = ref(false);
   const editing = ref(false);
   /** The draft: a working copy of YOUR views while editing. */
@@ -73,12 +75,12 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   // ---- what is stored, and what is shown ----
 
-  // Off when the kill switch is off - or, for as long as the URL says so, when it carries
+  // Off when this person's switch is off - or, for as long as the URL says so, when it carries
   // `?confviews=false`: Rancher's own page, with nothing stored and the switch untouched.
   const route = useRoute();
   const templatingEnabled = computed(() => isTemplatingEnabled(store.getters) && !viewsOffInUrl(route?.query));
 
-  const scopes = computed(() => appliedViewScopes(store.getters, userId.value, props.page));
+  const scopes = computed(() => appliedViewScopes(store.getters, props.page));
 
   // Your saved views (what the editor writes), and the ones an admin published for the organization.
   const userSet = computed<PageViews | null>(() => optimistic.value || scopes.value.user);
@@ -198,13 +200,11 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
   });
 
   /**
-   * Who is asking, then what is stored for them, read once. Nothing stored and no access to it are the
-   * same answer: Rancher's own page, straight away. A read that failed is read again on the next visit.
+   * What is published, read once; the person's own views are already here, with their preferences.
+   * Nothing stored and no access to it are the same answer: Rancher's own page, straight away. A read
+   * that failed is read again on the next visit.
    */
   async function load(): Promise<void> {
-    await store.dispatch('auth/getUser').catch(() => undefined);
-    userId.value = store.getters['auth/user']?.id || null;
-
     await fetchTemplatingConfigMaps(store);
 
     syncActiveView();
@@ -225,8 +225,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     pinnedView.value = !!activeId;
 
     try {
-      await saveView(store, 'user', draft, userId.value, props.page);
-      await fetchTemplatingConfigMaps(store);
+      await saveView(store, 'user', draft, props.page);
     } catch (e) {
       error.value = (e as Error)?.message || String(e);
     } finally {
@@ -256,7 +255,6 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
   }
 
   return {
-    userId,
     loaded,
     editing,
     working,

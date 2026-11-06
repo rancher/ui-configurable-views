@@ -12,6 +12,7 @@ import { MANAGEMENT } from '@shell/config/types';
 import {
   appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig, type PageKey
 } from '../templating/template-engine';
+import { definePrefs } from '../templating/user-prefs';
 import { cssSize, isStockView, normalizeSides } from '../templating/view-model';
 import { blockLabelKey } from '../templating/widget-catalog';
 import type { View, PageViews, WidgetNode } from '../templating/types';
@@ -38,7 +39,8 @@ interface Section {
 const store = useStore();
 const { t } = useI18n(store);
 
-const userId = ref<string | null>(null);
+definePrefs(store);
+
 const loaded = ref(false);
 const yamlPage = ref<PageKey | null>(null);
 const yamlDraft = ref('');
@@ -79,15 +81,12 @@ const pages = computed<PageEntry[]>(() => [
 onMounted(async() => {
   store.dispatch('management/findAll', { type: MANAGEMENT.CLUSTER }).catch(() => undefined);
   await fetchTemplatingConfigMaps(store);
-  const user = await store.dispatch('auth/getUser').catch(() => null);
-
-  userId.value = user?.id || store.getters['auth/user']?.id || null;
   loaded.value = true;
 });
 
 /** The scopes that have views for a page: the organization's, then yours. */
 function sectionsFor(page: PageKey): Section[] {
-  const scopes = appliedViewScopes(store.getters, userId.value, page);
+  const scopes = appliedViewScopes(store.getters, page);
   const out: Section[] = [];
 
   if (scopes.global?.views.length) {

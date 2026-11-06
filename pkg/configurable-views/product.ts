@@ -10,8 +10,8 @@ export const product: ProductMetadata = {
   sideBar:  { weight: -1, icon: { name: 'compass' } },
 };
 
-// Its two pages. The one on top is where the product opens, so Settings - the kill switch - leads:
-// always reachable, including when the feature is off.
+// Its two pages. The one on top is where the product opens, so Settings - each person's on/off switch -
+// leads: always reachable, including when the feature is off.
 export const pages: ProductChildCustomPage[] = [
   {
     name:      PAGE_SETTINGS,

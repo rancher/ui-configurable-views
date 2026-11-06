@@ -27,7 +27,7 @@ export function useEditSession(
 ) {
   const {
     editing, working, savedBaseline, activeViewId, pinnedView, selectedNodeId, newViewId, startedFrom,
-    settingsNodeId, saving, drawerOpen, error, userId, orgViews, orgTemplate, activeView, views, dirty,
+    settingsNodeId, saving, drawerOpen, error, orgViews, orgTemplate, activeView, views, dirty,
   } = pageViews;
 
   /**
@@ -131,11 +131,10 @@ export function useEditSession(
 
     try {
       pruneUntouchedForks(draft);
-      await saveView(store, 'user', draft, userId.value, props.page);
+      await saveView(store, 'user', draft, props.page);
       savedBaseline.value = JSON.stringify(draft);
       newViewId.value = null;
       startedFrom.value = '';
-      await fetchTemplatingConfigMaps(store);
 
       if (!keepEditing) {
         await leaveEdit();

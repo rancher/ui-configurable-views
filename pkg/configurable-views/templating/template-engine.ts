@@ -1,19 +1,23 @@
-// Where the configurable pages are STORED: two labeled ConfigMaps in the local cluster's `default`
-// namespace, read and written through the management store (Steve `/v1/`).
+// Where the configurable pages are STORED.
 //
-//   templating-home    one key per PAGE, each holding every saved view of that page:
+// What a person keeps for themselves - their own views, and whether the pages are on - is in their
+// user preferences (see user-prefs).
+//
+// The views published for everyone are in one labeled ConfigMap in the local cluster's `default`
+// namespace, read and written through the management store (Steve `/v1/`):
+//
+//   templating-home    one key per PAGE, each holding the views published for that page:
 //                        data.home              the Home
 //                        data.clusterDashboard  the cluster dashboard - one set of views for every
 //                                               cluster, whose widgets follow the cluster they are on
-//                      each shaped { global: <View>, users: { <uid>: <View> } }
-//   templating-config  data.enabled — the kill switch; 'false' turns the feature off, everywhere
+//                      each shaped { global: <View> }
 //
-// Two ConfigMaps rather than one so that writing the Home can never flip the switch. ConfigMaps in
-// `default` are a prototype's storage: per-user state belongs in a user preference and the published
-// view in a Setting, which is an open question on the pull request.
+// Someone who cannot read that ConfigMap does not see published views. It is a prototype's storage,
+// until they move to a CRD.
 
 import type { VuexStore } from '@shell/types/store/vuex';
 import { CONFIG_MAP } from '@shell/config/types';
+import { PREF_ENABLED, PREF_VIEWS, definePrefs, savePref } from './user-prefs';
 import { migratePageViews } from './view-model';
 import type { PageViews } from './types';
 
@@ -22,13 +26,11 @@ type Getters = VuexStore['getters'];
 const NAMESPACE = 'default';
 
 // Every stored ConfigMap carries the marker; the type label tells them apart.
-// The marker keeps its old name on purpose. It is ON the stored ConfigMaps - every saved view and
-// the kill switch - so renaming it orphans all of them.
+// The marker keeps its old name on purpose. It is ON the stored ConfigMaps, so renaming it orphans them.
 const LABEL_MARKER = 'templates.rancher.io/ai-templating';
 const LABEL_TYPE = 'templates.rancher.io/type';
 const TYPE_CONFIG = 'config';
 
-const CONFIG_NAME = 'templating-config';
 const HOME_CONFIG_NAME = 'templating-home';
 
 const configLabels = { [LABEL_MARKER]: 'true', [LABEL_TYPE]: TYPE_CONFIG };
@@ -56,7 +58,6 @@ interface ConfigMapModel {
 /** What one page's key of `templating-home` holds, parsed. Views stay `unknown` until migratePageViews has checked them. */
 export interface PageConfig {
   global?: unknown;
-  users?: Record<string, unknown>;
 }
 
 /** The saved views as one user sees them. */
@@ -113,17 +114,10 @@ export async function fetchTemplatingConfigMaps(store: VuexStore): Promise<void>
 }
 
 function pageConfig(getters: Getters, page: PageKey): PageConfig {
-  const stored = cmNamed(getters, HOME_CONFIG_NAME)?.data?.[page];
-
-  if (stored !== undefined) {
-    return parse(stored);
-  }
-
-  // The Home used to live in the kill-switch ConfigMap. Still read there until the next save moves it.
-  return page === PAGE_HOME ? parse(cmNamed(getters, CONFIG_NAME)?.data?.[PAGE_HOME]) : {};
+  return parse(cmNamed(getters, HOME_CONFIG_NAME)?.data?.[page]);
 }
 
-/** A page's raw stored config ({ global, users }) - for the Configurable Views page's YAML editor. */
+/** A page's raw published config ({ global }) - for the Configurable Views page's YAML editor. */
 export function getPageConfig(getters: Getters, page: PageKey = PAGE_HOME): PageConfig {
   return pageConfig(getters, page);
 }
@@ -133,10 +127,9 @@ export function getPageConfig(getters: Getters, page: PageKey = PAGE_HOME): Page
  * organization's, and a disabled view is skipped so the scope beneath it shows. Old stored shapes
  * are migrated on read (see migratePageViews).
  */
-export function appliedViewScopes(getters: Getters, userId?: string | null, page: PageKey = PAGE_HOME): ViewScopes {
-  const home = pageConfig(getters, page);
-  const rawGlobal = home.global || null;
-  const rawUser = (userId && home.users?.[userId]) || null;
+export function appliedViewScopes(getters: Getters, page: PageKey = PAGE_HOME): ViewScopes {
+  const rawGlobal = pageConfig(getters, page).global || null;
+  const rawUser = getters['prefs/get'](PREF_VIEWS)?.[page] || null;
 
   const global = rawGlobal ? migratePageViews(rawGlobal) : null;
   const user = rawUser ? migratePageViews(rawUser) : null;
@@ -152,11 +145,11 @@ export function appliedViewScopes(getters: Getters, userId?: string | null, page
   };
 }
 
-// ---- the kill switch --------------------------------------------------------------------------------
+// ---- the on/off switch ------------------------------------------------------------------------------
 
-/** data.enabled === 'false' turns the feature off. Absent, or anything else, means on. */
+/** Each person's own: on, until they turn it off. */
 export function isTemplatingEnabled(getters: Getters): boolean {
-  return cmNamed(getters, CONFIG_NAME)?.data?.enabled !== 'false';
+  return getters['prefs/get'](PREF_ENABLED) !== false;
 }
 
 /** The URL's own switch: `?confviews=false`. */
@@ -164,8 +157,8 @@ export const VIEWS_QUERY = 'confviews';
 
 /**
  * Whether the URL turns the configurable pages off: `?confviews=false` shows Rancher's own page, as
- * the kill switch does, but only for as long as it is in the URL - nothing is stored, and the switch
- * itself is not touched.
+ * the switch does, but only for as long as it is in the URL - nothing is stored, and the switch itself
+ * is not touched.
  */
 export function viewsOffInUrl(query: Record<string, unknown> | null | undefined): boolean {
   const value = query?.[VIEWS_QUERY];
@@ -173,25 +166,16 @@ export function viewsOffInUrl(query: Record<string, unknown> | null | undefined)
   return (Array.isArray(value) ? value[0] : value) === 'false';
 }
 
-/** Set the kill switch - or flip it, with no argument. Resolves to the new state. */
+/**
+ * Set this person's switch - or flip it, with no argument. Resolves to the new state. Its shortcut works
+ * on any page, so it may be the first thing here to touch the preferences.
+ */
 export async function toggleTemplating(store: VuexStore, enabled?: boolean): Promise<boolean> {
+  definePrefs(store);
+
   const desired = typeof enabled === 'boolean' ? enabled : !isTemplatingEnabled(store.getters);
-  const existing = cmNamed(store.getters, CONFIG_NAME);
 
-  if (existing) {
-    existing.data = { ...(existing.data || {}), enabled: desired ? 'true' : 'false' };
-    await existing.save();
-  } else {
-    const cm: ConfigMapModel = await store.dispatch('management/create', {
-      type:     CONFIG_MAP,
-      metadata: {
-        name: CONFIG_NAME, namespace: NAMESPACE, labels: configLabels
-      },
-      data: { enabled: desired ? 'true' : 'false' },
-    });
-
-    await cm.save();
-  }
+  await savePref(store, PREF_ENABLED, desired);
 
   return desired;
 }
@@ -199,9 +183,8 @@ export async function toggleTemplating(store: VuexStore, enabled?: boolean): Pro
 // ---- writing ------------------------------------------------------------------------------------------
 
 /**
- * Write one page's whole stored config to `templating-home`, creating it if needed. Each page is its
- * own key, and the other pages' keys are written back as they were; nothing here touches the kill
- * switch, which is a different ConfigMap.
+ * Write one page's whole published config to `templating-home`, creating it if needed. Each page is
+ * its own key, and the other pages' keys are written back as they were.
  */
 async function persistPage(store: VuexStore, page: PageKey, config: PageConfig): Promise<void> {
   const existing = cmNamed(store.getters, HOME_CONFIG_NAME);
@@ -222,25 +205,30 @@ async function persistPage(store: VuexStore, page: PageKey, config: PageConfig):
   }
 }
 
-/** Write a page's raw stored config - from the Configurable Views page's YAML editor. */
+/** Write a page's raw published config - from the Configurable Views page's YAML editor. */
 export async function savePageConfig(store: VuexStore, config: PageConfig | null, page: PageKey = PAGE_HOME): Promise<void> {
   await persistPage(store, page, config || {});
 }
 
 /** Save one scope's view of a page. `null` clears that scope. */
-export async function saveView(store: VuexStore, scope: 'global' | 'user', view: PageViews | null, userId?: string | null, page: PageKey = PAGE_HOME): Promise<void> {
+export async function saveView(store: VuexStore, scope: 'global' | 'user', view: PageViews | null, page: PageKey = PAGE_HOME): Promise<void> {
+  if (scope === 'user') {
+    const saved = store.getters['prefs/get'](PREF_VIEWS);
+
+    if (view) {
+      saved[page] = JSON.parse(JSON.stringify(view));
+    } else {
+      delete saved[page];
+    }
+
+    await savePref(store, PREF_VIEWS, saved);
+
+    return;
+  }
+
   const home = pageConfig(store.getters, page);
 
-  if (scope === 'user') {
-    if (!userId) {
-      return;
-    }
-    if (view) {
-      home.users = { ...(home.users || {}), [userId]: view };
-    } else if (home.users) {
-      delete home.users[userId];
-    }
-  } else if (view) {
+  if (view) {
     home.global = view;
   } else {
     delete home.global;

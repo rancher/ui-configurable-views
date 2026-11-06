@@ -72,13 +72,15 @@ describe('extension: configurable-views', () => {
     expect(action.shortcut).toStrictEqual({ windows: ['shift', 'v'], mac: ['shift', 'v'] });
 
     const before = viewBarVisible.value;
+    const $store = { getters: { 'prefs/get': () => before }, dispatch: jest.fn().mockResolvedValue(undefined) };
 
-    action.invoke();
+    action.invoke.call({ $store });
+    expect($store.dispatch).toHaveBeenCalledWith('prefs/set', { key: 'configurable-views-bar-visible', value: !before });
     expect(viewBarVisible.value).toBe(!before);
     expect(action.ariaExpanded()).toBe(!before);
   });
 
-  describe('the kill switch shortcut', () => {
+  describe('the on/off shortcut', () => {
     // What a header action runs with as `this`
     function header() {
       return {

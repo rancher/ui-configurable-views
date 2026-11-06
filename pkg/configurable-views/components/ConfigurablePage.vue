@@ -10,7 +10,7 @@ import EditViewSidebar from './EditViewSidebar.vue';
 import WidgetSettingsModal from './WidgetSettingsModal.vue';
 import UndoGrowl from './UndoGrowl.vue';
 import { useConfirm } from '../composables/useConfirm';
-import { viewBarLocked, viewBarVisible } from '../composables/useViewBarVisibility';
+import { loadViewBar, viewBarLocked, viewBarVisible } from '../composables/useViewBarVisibility';
 import { usePageViews } from '../composables/usePageViews';
 import { useEditSession } from '../composables/useEditSession';
 import { useViewActions } from '../composables/useViewActions';
@@ -138,6 +138,8 @@ const barProps = computed(() => ({
   startedFrom:  startedFrom.value,
   drawerOpen:   drawerOpen.value,
 }));
+
+loadViewBar(store);
 
 // Hidden until asked for from the header, but always there while editing: its buttons are the way out,
 // so the header's toggle is locked until the editor closes.

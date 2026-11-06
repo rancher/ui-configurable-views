@@ -2,6 +2,7 @@ import type { VuexStore } from '@shell/types/store/vuex';
 import {
   appliedViewScopes, getPageConfig, isTemplatingEnabled, saveView, toggleTemplating, viewsOffInUrl
 } from '@pkg/configurable-views/templating/template-engine';
+import { PREF_ENABLED, PREF_VIEWS } from '@pkg/configurable-views/templating/user-prefs';
 import type { PageViews } from '@pkg/configurable-views/templating/types';
 
 const MARKER = 'templates.rancher.io/ai-templating';
@@ -22,14 +23,22 @@ function configMap(name: string, data: Record<string, unknown>, type = 'config')
   };
 }
 
-// A store holding the given ConfigMaps, the way the management store hands them back.
-function storeWith(...maps: FakeConfigMap[]) {
+// A store holding the given ConfigMaps, the way the management store hands them back, and this person's
+// preferences, the way the shell hands them back: a copy each time.
+function storeWith(maps: FakeConfigMap[] = [], prefs: Record<string, unknown> = {}) {
   const created: FakeConfigMap[] = [];
   const getters = {
     'management/byId': (_type: string, id: string) => maps.find((m) => `${ m.metadata.namespace }/${ m.metadata.name }` === id),
-    'management/all':  () => maps,
+    'management/all':  (type: string) => (type === 'userpreference' ? [] : maps),
+    'prefs/get':       (key: string) => JSON.parse(JSON.stringify(prefs[key] ?? (key === PREF_VIEWS ? {} : null))),
   };
-  const dispatch = jest.fn((action: string, spec: FakeConfigMap) => {
+  const dispatch = jest.fn((action: string, spec: FakeConfigMap & { key: string; value: unknown }) => {
+    if (action === 'prefs/set') {
+      prefs[spec.key] = spec.value;
+
+      return Promise.resolve();
+    }
+
     const made = { ...spec, save: jest.fn().mockResolvedValue(undefined) };
 
     created.push(made);
@@ -38,7 +47,12 @@ function storeWith(...maps: FakeConfigMap[]) {
   });
 
   return {
-    store: { getters, dispatch } as unknown as VuexStore, created, dispatch
+    store: {
+      getters, dispatch, commit: jest.fn()
+    } as unknown as VuexStore,
+    created,
+    dispatch,
+    prefs,
   };
 }
 
@@ -49,16 +63,18 @@ const set = (...names: string[]): PageViews => ({
 });
 
 describe('appliedViewScopes', () => {
-  it("shows a user their own views over the organization's", () => {
-    const { store } = storeWith(configMap('templating-home', { home: { global: set('Org'), users: { u1: set('Mine') } } }));
+  const published = configMap('templating-home', { home: { global: set('Org') } });
 
-    expect(appliedViewScopes(store.getters, 'u1').resolved?.views.map((v) => v.name)).toStrictEqual(['Mine']);
-    expect(appliedViewScopes(store.getters, 'u2').resolved?.views.map((v) => v.name)).toStrictEqual(['Org']);
+  it("shows a person their own views over the organization's", () => {
+    const { store } = storeWith([published], { [PREF_VIEWS]: { home: set('Mine') } });
+
+    expect(appliedViewScopes(store.getters).resolved?.views.map((v) => v.name)).toStrictEqual(['Mine']);
+    expect(appliedViewScopes(storeWith([published]).store.getters).resolved?.views.map((v) => v.name)).toStrictEqual(['Org']);
   });
 
-  it("falls back to the organization's when a user's scope is switched off", () => {
-    const { store } = storeWith(configMap('templating-home', { home: { global: set('Org'), users: { u1: { ...set('Mine'), disabled: true } } } }));
-    const scopes = appliedViewScopes(store.getters, 'u1');
+  it("falls back to the organization's when a person's scope is switched off", () => {
+    const { store } = storeWith([published], { [PREF_VIEWS]: { home: { ...set('Mine'), disabled: true } } });
+    const scopes = appliedViewScopes(store.getters);
 
     expect(scopes.resolved?.views.map((v) => v.name)).toStrictEqual(['Org']);
     expect(scopes.user?.disabled).toBe(true);
@@ -66,38 +82,39 @@ describe('appliedViewScopes', () => {
   });
 
   it('keeps each page apart', () => {
-    const { store } = storeWith(configMap('templating-home', { home: { global: set('Home') }, clusterDashboard: { global: set('Dash') } }));
+    const { store } = storeWith([configMap('templating-home', { home: { global: set('Home') }, clusterDashboard: { global: set('Dashboard') } })], { [PREF_VIEWS]: { home: set('Mine') } });
 
-    expect(appliedViewScopes(store.getters, null, 'clusterDashboard').resolved?.views.map((v) => v.name)).toStrictEqual(['Dash']);
+    expect(appliedViewScopes(store.getters, 'clusterDashboard').resolved?.views.map((v) => v.name)).toStrictEqual(['Dashboard']);
   });
 
   it('reads views stored under their earlier name', () => {
-    const { store } = storeWith(configMap('templating-home', { home: { users: { u1: { panels: [{ id: 'p', name: 'Old' }], defaultPanelId: 'p' } } } }));
-    const { user } = appliedViewScopes(store.getters, 'u1');
+    const { store } = storeWith([configMap('templating-home', { home: { global: { panels: [{ id: 'p', name: 'Old' }], defaultPanelId: 'p' } } })]);
+    const { global } = appliedViewScopes(store.getters);
 
-    expect(user?.views.map((v) => v.name)).toStrictEqual(['Old']);
-    expect(user?.defaultViewId).toBe('p');
+    expect(global?.views.map((v) => v.name)).toStrictEqual(['Old']);
+    expect(global?.defaultViewId).toBe('p');
   });
 
   it('has nothing to show when nothing is stored, or it cannot be read', () => {
-    expect(appliedViewScopes(storeWith().store.getters, 'u1').resolved).toBeNull();
-    expect(appliedViewScopes(storeWith(configMap('templating-home', { home: '{not json' })).store.getters, 'u1').resolved).toBeNull();
+    expect(appliedViewScopes(storeWith().store.getters).resolved).toBeNull();
+    expect(appliedViewScopes(storeWith([configMap('templating-home', { home: '{not json' })]).store.getters).resolved).toBeNull();
   });
 });
 
 describe('getPageConfig', () => {
-  it('still reads a Home stored in the kill-switch ConfigMap, where it used to live', () => {
-    const { store } = storeWith(configMap('templating-config', { home: { global: set('Legacy') } }));
+  it('reads what is published for one page', () => {
+    const { store } = storeWith([configMap('templating-home', { home: { global: set('Org') } })]);
 
-    expect(getPageConfig(store.getters, 'home')).toStrictEqual({ global: set('Legacy') });
+    expect(getPageConfig(store.getters, 'home')).toStrictEqual({ global: set('Org') });
     expect(getPageConfig(store.getters, 'clusterDashboard')).toStrictEqual({});
   });
 });
 
-describe('the kill switch', () => {
-  it('is on unless it says "false"', () => {
+describe('the on/off switch', () => {
+  it('is on until this person turns it off', () => {
     expect(isTemplatingEnabled(storeWith().store.getters)).toBe(true);
-    expect(isTemplatingEnabled(storeWith(configMap('templating-config', { enabled: 'false' })).store.getters)).toBe(false);
+    expect(isTemplatingEnabled(storeWith([], { [PREF_ENABLED]: true }).store.getters)).toBe(true);
+    expect(isTemplatingEnabled(storeWith([], { [PREF_ENABLED]: false }).store.getters)).toBe(false);
   });
 
   it('is off in the URL with ?confviews=false, and only then', () => {
@@ -109,52 +126,66 @@ describe('the kill switch', () => {
     expect(viewsOffInUrl(undefined)).toBe(false);
   });
 
-  it('flips and saves the stored switch', async() => {
-    const cm = configMap('templating-config', { enabled: 'true' });
+  it("flips and saves this person's switch, with its preference defined first", async() => {
+    const { store, dispatch } = storeWith();
 
-    expect(await toggleTemplating(storeWith(cm).store)).toBe(false);
-    expect(cm.data.enabled).toBe('false');
-    expect(cm.save).toHaveBeenCalledTimes(1);
+    expect(await toggleTemplating(store)).toBe(false);
+    expect(dispatch).toHaveBeenCalledWith('prefs/set', { key: PREF_ENABLED, value: false });
+    expect(store.commit).toHaveBeenCalledWith('prefs/setDefinition', expect.objectContaining({ name: PREF_ENABLED }));
   });
 });
 
 describe('saveView', () => {
-  it("writes one user's views, leaving other users and other pages as they were", async() => {
-    const cm = configMap('templating-home', { home: { global: set('Org'), users: { u2: set('Theirs') } }, clusterDashboard: { global: set('Dash') } });
+  it("writes a person's views to their preferences, leaving other pages as they were", async() => {
+    const { store, prefs } = storeWith([], { [PREF_VIEWS]: { clusterDashboard: set('Dash') } });
 
-    await saveView(storeWith(cm).store, 'user', set('Mine'), 'u1', 'home');
+    await saveView(store, 'user', set('Mine'), 'home');
 
-    expect(JSON.parse(cm.data.home)).toStrictEqual({ global: set('Org'), users: { u2: set('Theirs'), u1: set('Mine') } });
-    expect(JSON.parse(cm.data.clusterDashboard)).toStrictEqual({ global: set('Dash') });
-    expect(cm.save).toHaveBeenCalledTimes(1);
+    expect(prefs[PREF_VIEWS]).toStrictEqual({ clusterDashboard: set('Dash'), home: set('Mine') });
+  });
+
+  it('keeps what it writes apart from the draft it was given', async() => {
+    const { store, prefs } = storeWith();
+    const draft = set('Mine');
+
+    await saveView(store, 'user', draft);
+    draft.views[0].name = 'Changed since';
+
+    expect((prefs[PREF_VIEWS] as Record<string, PageViews>).home.views[0].name).toBe('Mine');
   });
 
   it('clears a scope when given nothing', async() => {
-    const cm = configMap('templating-home', { home: { global: set('Org'), users: { u1: set('Mine') } } });
+    const cm = configMap('templating-home', { home: { global: set('Org') } });
+    const { store, prefs } = storeWith([cm], { [PREF_VIEWS]: { home: set('Mine') } });
 
-    await saveView(storeWith(cm).store, 'user', null, 'u1');
-    await saveView(storeWith(cm).store, 'global', null);
+    await saveView(store, 'user', null);
+    await saveView(store, 'global', null);
 
-    expect(JSON.parse(cm.data.home)).toStrictEqual({ users: {} });
+    expect(prefs[PREF_VIEWS]).toStrictEqual({});
+    expect(JSON.parse(cm.data.home)).toStrictEqual({});
+  });
+
+  it('publishes to the ConfigMap, leaving other pages as they were, and touches no preference', async() => {
+    const cm = configMap('templating-home', { home: { global: set('Old') }, clusterDashboard: { global: set('Dash') } });
+    const { store, dispatch } = storeWith([cm]);
+
+    await saveView(store, 'global', set('Org'), 'home');
+
+    expect(JSON.parse(cm.data.home)).toStrictEqual({ global: set('Org') });
+    expect(JSON.parse(cm.data.clusterDashboard)).toStrictEqual({ global: set('Dash') });
+    expect(cm.save).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('creates the ConfigMap the first time, labelled so it is found again', async() => {
     const { store, created } = storeWith();
 
-    await saveView(store, 'global', set('Org'), null, 'clusterDashboard');
+    await saveView(store, 'global', set('Org'), 'clusterDashboard');
 
     expect(created).toHaveLength(1);
     expect(created[0].metadata).toStrictEqual(expect.objectContaining({ name: 'templating-home', namespace: 'default' }));
     expect(created[0].metadata.labels[MARKER]).toBe('true');
     expect(JSON.parse(created[0].data.clusterDashboard)).toStrictEqual({ global: set('Org') });
     expect(created[0].save).toHaveBeenCalledTimes(1);
-  });
-
-  it('does nothing for a user scope with no user', async() => {
-    const { store, dispatch } = storeWith();
-
-    await saveView(store, 'user', set('Mine'), null);
-
-    expect(dispatch).not.toHaveBeenCalled();
   });
 });

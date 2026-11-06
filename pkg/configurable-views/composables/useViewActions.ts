@@ -34,7 +34,7 @@ export function useViewActions(
   leaveEdit: () => Promise<void>,
 ) {
   const {
-    editing, activeViewId, pinnedView, saving, error, userId, scopes, orgIds, views,
+    editing, activeViewId, pinnedView, saving, error, scopes, orgIds, views,
   } = pageViews;
 
   /** Renamed in place on its tab. */
@@ -139,7 +139,7 @@ export function useViewActions(
 
     if (draft && mine) {
       mine.from = publishedId;
-      await saveView(store, 'user', draft, userId.value, props.page);
+      await saveView(store, 'user', draft, props.page);
     }
   }
 
@@ -176,7 +176,7 @@ export function useViewActions(
     error.value = '';
 
     try {
-      await saveView(store, 'global', org, userId.value, props.page);
+      await saveView(store, 'global', org, props.page);
       await linkToPublished(source, published.id);
       await fetchTemplatingConfigMaps(store);
     } catch (e) {
@@ -215,7 +215,7 @@ export function useViewActions(
       const org: PageViews = scopes.value.global ? clone(scopes.value.global) : { views: [] };
 
       org.views = org.views.filter((p) => p.id !== orgId);
-      await saveView(store, 'global', org.views.length ? org : null, userId.value, props.page);
+      await saveView(store, 'global', org.views.length ? org : null, props.page);
       await fetchTemplatingConfigMaps(store);
 
       if (view.org) {
