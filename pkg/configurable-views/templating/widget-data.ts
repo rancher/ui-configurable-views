@@ -35,12 +35,17 @@ export interface SteveSort {
 
 // ---- what a cluster serves ------------------------------------------------------------------------
 
-/** Every cluster the user can see, as picker options, by the name a person would recognise. */
-export function clusterOptions(getters: Getters): { id: string; label: string }[] {
-  const clusters: { id: string; nameDisplay?: string; spec?: { displayName?: string } }[] = getters['management/all']?.(MANAGEMENT.CLUSTER) || [];
+/**
+ * Every cluster the user can see, as picker options, by the name a person would recognise. Read, not
+ * loaded: a table on the page may be showing a page of them from the store, and a `findAll` of the type
+ * would replace that page, leaving the table with no rows.
+ */
+export async function fetchClusterOptions(store: VuexStore): Promise<{ id: string; label: string }[]> {
+  const res = await store.dispatch('management/request', { url: `/v1/${ MANAGEMENT.CLUSTER }?pagesize=100000&exclude=metadata.managedFields` });
+  const clusters: { id: string; spec?: { displayName?: string } }[] = res?.data || [];
 
   return clusters
-    .map((c) => ({ id: c.id, label: c.nameDisplay || c.spec?.displayName || c.id }))
+    .map((c) => ({ id: c.id, label: c.spec?.displayName || c.id }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 

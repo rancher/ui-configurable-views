@@ -5,8 +5,7 @@ import {
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcButton } from '@components/RcButton';
-import { MANAGEMENT } from '@shell/config/types';
-import { clusterOptions } from '../templating/widget-data';
+import { fetchClusterOptions } from '../templating/widget-data';
 import { blockLabelKey } from '../templating/widget-catalog';
 import { WIDGETS } from './widgets/registry';
 import type { SettingsAnchor } from '../composables/viewEditor';
@@ -98,7 +97,7 @@ const heading = computed(() => {
 const needsClusters = computed(() => !!definition.value?.source);
 const offersRancher = computed(() => definition.value?.source === 'rancherOrCluster');
 
-const clusters = computed(() => clusterOptions(store.getters));
+const clusters = ref<{ id: string; label: string }[]>([]);
 
 /** The Cluster field's value for "Rancher" - never a cluster's id, which has no colon. */
 const RANCHER = ':rancher';
@@ -114,17 +113,12 @@ const where = computed({
 });
 
 /**
- * Load the clusters the picker offers, the moment it is shown.
- *
- * The picker reads them from the store, and nothing on the Home is obliged to have put them there -
- * the cluster list pages, so it holds one page of them at most, and a Home without one holds none.
- *
- * Fetched here, not on every Home load: a picker of clusters needs all of them, but only while
- * somebody is choosing one.
+ * Read the clusters the picker offers, the moment it is shown, and not on every Home load: a picker of
+ * clusters needs all of them, but only while somebody is choosing one.
  */
-watch(needsClusters, (needed) => {
+watch(needsClusters, async(needed) => {
   if (needed) {
-    store.dispatch('management/findAll', { type: MANAGEMENT.CLUSTER }).catch(() => undefined);
+    clusters.value = await fetchClusterOptions(store).catch(() => []);
   }
 }, { immediate: true });
 
