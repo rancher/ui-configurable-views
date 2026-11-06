@@ -1,5 +1,6 @@
 import { onBeforeUnmount, watch } from 'vue';
 import Socket, { EVENT_CONNECTED, EVENT_MESSAGE } from '@shell/utils/socket';
+import { clusterUrl } from '../templating/widget-data';
 
 // Hearing that a type has changed in a cluster that is not the open one.
 //
@@ -88,7 +89,7 @@ function feedFor(cluster: string): Feed {
     return known;
   }
 
-  const socket = new Socket(`/k8s/clusters/${ encodeURIComponent(cluster) }/v1/subscribe`);
+  const socket = new Socket(clusterUrl(cluster, 'subscribe'));
   const feed: Feed = {
     socket, listeners: new Map(), refused: new Set(), missed: new Set()
   };

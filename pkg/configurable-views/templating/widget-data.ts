@@ -49,7 +49,7 @@ export async function fetchClusterOptions(store: VuexStore): Promise<{ id: strin
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function clusterUrl(cluster: string, path: string): string {
+export function clusterUrl(cluster: string, path: string): string {
   return `/k8s/clusters/${ encodeURIComponent(cluster) }/v1/${ path }`;
 }
 

@@ -35,7 +35,7 @@ const HOME_CONFIG_NAME = 'templating-home';
 
 const configLabels = { [LABEL_MARKER]: 'true', [LABEL_TYPE]: TYPE_CONFIG };
 
-// The pages that can be configured, by the key their views are stored under in templating-home.
+// The pages that can be configured, by the key their views are stored under.
 export const PAGE_HOME = 'home';
 export const PAGE_CLUSTER_DASHBOARD = 'clusterDashboard';
 
