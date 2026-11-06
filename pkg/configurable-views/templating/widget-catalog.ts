@@ -269,11 +269,11 @@ export function searchCatalog(list: CatalogEntry[], query: string, textOf: (entr
 }
 
 /**
- * The context a table widget pages under: the Home's own.
+ * The context a table from Rancher pages under: the Home's own.
  *
- * Server-side pagination is enabled per type per context, and the shell enables the cluster types
- * here, with the server-side columns their sorting and filtering need. Any other type is not paged in
- * this context, so its table reads it whole and pages it in the browser. The package registers no
- * paging of its own.
+ * What limits paging is the shell's list of types for the store, not the context. For the `management`
+ * store that list is short: under this context, both kinds of cluster and secrets, the most of any
+ * context, with the server-side columns their sorting and filtering need. Any other type is read whole
+ * and paged in the browser. The package registers no paging of its own.
  */
 export const PAGINATION_CONTEXT = 'home';

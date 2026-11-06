@@ -33,28 +33,7 @@ export interface SteveSort {
 }
 
 
-// ---- where a resource lives ---------------------------------------------------------------------
-
-/**
- * Which store to read a type from.
- *
- * NOT `currentStore`: that answers "where does this type live when you are INSIDE a cluster", and
- * sends anything cluster-scoped — a Fleet GitRepo, a Longhorn Volume, an Event — to the `cluster`
- * store. The Home is not inside a cluster, so that store is empty here, and a widget asking it
- * reports the type as missing when it is installed and readable all along.
- *
- * The Home reads the local cluster through MANAGEMENT (Steve /v1), so prefer whichever store
- * actually has a schema for the type, management first.
- */
-export function storeForType(getters: Getters, type: string): string {
-  if (!type) {
-    return 'management';
-  }
-
-  const stores = ['management', getters['currentStore'](type), 'cluster'];
-
-  return stores.find((store) => store && getters[`${ store }/schemaFor`]?.(type)) || 'management';
-}
+// ---- what a cluster serves ------------------------------------------------------------------------
 
 /** Every cluster the user can see, as picker options, by the name a person would recognise. */
 export function clusterOptions(getters: Getters): { id: string; label: string }[] {
@@ -70,13 +49,23 @@ function clusterUrl(cluster: string, path: string): string {
 }
 
 /**
- * The schemas of one cluster's own API - every type it serves, for the Resource picker, and the
- * schema of a type that only that cluster has. Read, not loaded: nothing goes into a store.
+ * The schemas of one cluster's own API: every type it serves, for the Resource picker. Read, not
+ * loaded: `create` only wraps each in the shell's schema model, and nothing goes into a store.
  */
 export async function fetchClusterSchemas(store: VuexStore, cluster: string): Promise<TypeSchema[]> {
   const res = await store.dispatch('management/request', { url: clusterUrl(cluster, 'schemas') });
 
-  return res?.data || [];
+  return Promise.all((res?.data || []).map((raw: TypeSchema) => store.dispatch('management/create', raw)));
+}
+
+/**
+ * One type's schema, as that cluster serves it. Two clusters can serve the same type with different
+ * columns, so a table of a cluster's rows draws that cluster's. null when it does not serve the type.
+ */
+export async function fetchClusterSchema(store: VuexStore, cluster: string, type: string): Promise<TypeSchema | null> {
+  const raw = await store.dispatch('management/request', { url: clusterUrl(cluster, `schemas/${ encodeURIComponent(type) }`), redirectUnauthorized: false });
+
+  return raw?.id ? store.dispatch('management/create', raw) : null;
 }
 
 export interface ClusterPageArgs {

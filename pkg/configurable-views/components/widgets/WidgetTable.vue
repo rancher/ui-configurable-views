@@ -6,7 +6,7 @@ import { useI18n } from '@shell/composables/useI18n';
 import PaginatedResourceTable from '@shell/components/PaginatedResourceTable.vue';
 import ResourceTable from '@shell/components/ResourceTable.vue';
 import WidgetCard from './WidgetCard.vue';
-import { columnsLinkingTo, fetchClusterSchemas, storeForType } from '../../templating/widget-data';
+import { columnsLinkingTo, fetchClusterSchema } from '../../templating/widget-data';
 import { PAGINATION_CONTEXT } from '../../templating/widget-catalog';
 import type { TypeSchema } from '../../templating/resource-types';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
@@ -51,29 +51,40 @@ const downstream = computed(() => !!props.widget.fromCluster);
  */
 const listed = computed(() => (!downstream.value && props.widget.resource === CAPI.RANCHER_CLUSTER ? MANAGEMENT.CLUSTER : props.widget.resource));
 
-const inStore = computed(() => storeForType(store.getters, listed.value));
-
-const storeSchema = computed(() => (listed.value ? store.getters[`${ inStore.value }/schemaFor`](listed.value) : null));
-
 /**
- * The schema of a type only the widget's cluster has - a CRD the local cluster does not - which no
- * store holds, so it is read from that cluster. Its columns are then the ones the CRD declares.
+ * The schema of a type as the widget's cluster serves it. Rows read from a cluster are drawn with that
+ * cluster's columns: another cluster, or the local one, can serve the same type with different ones.
  */
 const clusterSchema = ref<TypeSchema | null>(null);
+const clusterSchemaLoading = ref(false);
 
-watch(() => [downstream.value && !storeSchema.value ? props.widget.resource : '', downstream.value ? cluster.value : ''], async([resource, from]) => {
+watch(() => [downstream.value ? props.widget.resource : '', downstream.value ? cluster.value : ''], async([resource, from]) => {
   clusterSchema.value = null;
 
   if (!resource || !from) {
+    clusterSchemaLoading.value = false;
+
     return;
   }
 
-  const schemas = await fetchClusterSchemas(store, from).catch(() => []);
+  clusterSchemaLoading.value = true;
 
-  clusterSchema.value = schemas.find((s) => s.id === resource) || null;
+  const found = await fetchClusterSchema(store, from, resource).catch(() => null);
+
+  // Asked again in the meantime: that answer is the one to keep.
+  if (downstream.value && props.widget.resource === resource && cluster.value === from) {
+    clusterSchema.value = found;
+    clusterSchemaLoading.value = false;
+  }
 }, { immediate: true });
 
-const schema = computed(() => storeSchema.value || clusterSchema.value);
+const schema = computed(() => {
+  if (downstream.value) {
+    return clusterSchema.value;
+  }
+
+  return listed.value ? store.getters['management/schemaFor'](listed.value) : null;
+});
 
 // The cluster the rows are in, which is the one their links go to: the one read from, or, for Rancher's
 // own API, the local cluster. That is rarely the one in the page's URL: the Home has none, and a
@@ -93,7 +104,7 @@ const viewTabs = computed(() => !!props.widget.viewTabs);
 const tableViewsPage = computed(() => (props.widget.ownViews && props.nodeId ? `widget-${ props.nodeId }` : null));
 
 // Rebuilt, too, when another table of the same global type leaves the page (see useSharedTypeList).
-const shared = useSharedTypeList(() => (!downstream.value && listed.value ? `${ inStore.value }/${ listed.value }` : null));
+const shared = useSharedTypeList(() => (!downstream.value && listed.value ? `management/${ listed.value }` : null));
 
 const tableKey = computed(() => JSON.stringify([listed.value, downstream.value, !!schema.value, viewTabs.value, tableViewsPage.value, shared.value]));
 
@@ -124,16 +135,22 @@ const count = computed<number | null>(() => {
     return null;
   }
 
-  const page = store.getters[`${ inStore.value }/havePage`]?.(listed.value);
+  const page = store.getters['management/havePage']?.(listed.value);
 
   if (typeof page?.result?.count === 'number') {
     return page.result.count;
   }
 
-  return (store.getters[`${ inStore.value }/all`]?.(listed.value) || []).length;
+  return (store.getters['management/all']?.(listed.value) || []).length;
 });
 
-const downstreamMessage = computed(() => (cluster.value ? rowsError.value : t(NO_CLUSTER)));
+const downstreamMessage = computed(() => {
+  if (!cluster.value) {
+    return t(NO_CLUSTER);
+  }
+
+  return rowsError.value || (clusterSchemaLoading.value || schema.value ? '' : t('configurableViews.widget.noType', { type: props.widget.resource }));
+});
 </script>
 
 <template>
@@ -141,7 +158,7 @@ const downstreamMessage = computed(() => (cluster.value ? rowsError.value : t(NO
     v-if="downstream"
     :title="widget.title"
     :count="widget.title ? count : null"
-    :loading="loadingRows && !rows.length"
+    :loading="clusterSchemaLoading || (loadingRows && !rows.length)"
     :error="downstreamMessage"
   >
     <!-- A type read from a named cluster: we fetch its rows ourselves, because the cluster is not
@@ -183,7 +200,7 @@ const downstreamMessage = computed(() => (cluster.value ? rowsError.value : t(NO
       :headers="headers"
       :pagination-headers="pagedHeaders"
       :context="PAGINATION_CONTEXT"
-      :override-in-store="inStore"
+      override-in-store="management"
       :table-views="true"
       :table-view-tabs="viewTabs"
       :table-views-page="tableViewsPage"

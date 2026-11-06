@@ -1,6 +1,6 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterPage, fetchClusterRows, fetchClusterSchemas, fetchMetricsBoards, fetchMonitoring,
+  columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterPage, fetchClusterRows, fetchClusterSchema, fetchClusterSchemas, fetchMetricsBoards, fetchMonitoring,
   fetchStateSummaries, hasMonitoringApps, objectRoute, summarizeCounts
 } from '@pkg/configurable-views/templating/widget-data';
 
@@ -60,11 +60,31 @@ describe('reading a type from one cluster', () => {
     });
   });
 
-  it('reads a cluster\'s own schemas from that cluster', async() => {
-    const { store, dispatch } = storeAnswering({ '/k8s/clusters/c-1/v1/schemas': { data: [{ id: 'pod' }] } });
+  // A store whose management/request answers with this, and whose management/create wraps what it is given.
+  function storeWithSchemas(answer: unknown) {
+    const dispatch = jest.fn((action: string, arg: object) => Promise.resolve(action === 'management/create' ? { ...arg, canList: true } : answer));
 
-    await expect(fetchClusterSchemas(store, 'c-1')).resolves.toStrictEqual([{ id: 'pod' }]);
-    expect(dispatch).toHaveBeenCalledTimes(1);
+    return { store: { dispatch } as unknown as VuexStore, dispatch };
+  }
+
+  it('reads a cluster\'s own schemas from that cluster, as models', async() => {
+    const { store, dispatch } = storeWithSchemas({ data: [{ id: 'pod' }] });
+
+    await expect(fetchClusterSchemas(store, 'c-1')).resolves.toStrictEqual([{ id: 'pod', canList: true }]);
+    expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/k8s/clusters/c-1/v1/schemas' });
+  });
+
+  it('reads one type\'s schema from that cluster, as a model', async() => {
+    const { store, dispatch } = storeWithSchemas({ id: 'example.com.thing' });
+
+    await expect(fetchClusterSchema(store, 'c-1', 'example.com.thing')).resolves.toStrictEqual({ id: 'example.com.thing', canList: true });
+    expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/k8s/clusters/c-1/v1/schemas/example.com.thing', redirectUnauthorized: false });
+  });
+
+  it('has no schema for a type the cluster does not answer for', async() => {
+    const { store } = storeWithSchemas({});
+
+    await expect(fetchClusterSchema(store, 'c-1', 'nothing')).resolves.toBeNull();
   });
 });
 

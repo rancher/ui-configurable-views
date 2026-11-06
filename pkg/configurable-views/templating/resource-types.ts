@@ -4,11 +4,11 @@
 import type { Schema, SchemaAttribute } from '@shell/plugins/steve/schema';
 
 /**
- * A schema as Steve serves it: the shell's type, with what the Resource picker reads that it does not
- * declare yet. Read raw from a cluster, so a type may come without its attributes.
+ * A schema model, as a store and `fetchClusterSchemas` hand it back: the shell's type, with what the
+ * Resource picker reads that it does not declare yet. A type may come without its attributes.
  */
 export interface TypeSchema extends Omit<Schema, 'attributes'> {
-  collectionMethods?: string[];
+  canList?: boolean;
   attributes?: Partial<Omit<SchemaAttribute, 'verbs'>> & {
     kind?: string;
     group?: string;
@@ -28,15 +28,11 @@ export interface TypeOption {
 const CORE = 'core';
 
 /**
- * Can a list of it be read? A Kubernetes kind whose collection answers a GET, and, where the schema
- * says which verbs it allows, one of them is `list` - some, like a kubeconfig, can only be made.
+ * Can a list of it be read? The shell's `canList`, for a Kubernetes kind: a schema with no kind, like
+ * `logging.banzaicloud.io.output.filters`, can say it lists and still only be part of another type.
  */
 export function isListable(schema: TypeSchema): boolean {
-  const verbs = schema.attributes?.verbs;
-
-  return !!schema.attributes?.kind &&
-    (schema.collectionMethods || []).some((method) => `${ method }`.toUpperCase() === 'GET') &&
-    (!verbs || verbs.includes('list'));
+  return !!schema.canList && !!schema.attributes?.kind;
 }
 
 /**
