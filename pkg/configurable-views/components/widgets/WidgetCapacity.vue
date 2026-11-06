@@ -5,13 +5,16 @@ import { useI18n } from '@shell/composables/useI18n';
 import HardwareResourceGauge from '@shell/components/HardwareResourceGauge.vue';
 import WidgetCard from './WidgetCard.vue';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
+import { usePolling } from '../../composables/usePolling';
 import { fetchClusterCapacity } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
 // CAPACITY — a cluster's pods, CPU and memory: reserved against what it can allocate, and live
 // usage where the cluster has a metrics server. The dashboard's own HardwareResourceGauge, three of
 // them, under the dashboard's own heading, with the dashboard's own arithmetic (fetchClusterCapacity)
-// run against the cluster this widget names.
+// run against the cluster this widget names. It polls, as the dashboard polls its metrics.
+
+const POLL_MS = 30000;
 
 const props = defineProps<{ widget: WidgetSpec }>();
 
@@ -32,6 +35,17 @@ interface Capacity {
 const capacity = ref<Capacity | null>(null);
 const error = ref('');
 
+async function readCapacity(id: string): Promise<void> {
+  const c = await fetchClusterCapacity(store, id);
+  const cores = (g: Gauge | null) => g && { ...g, units: t('clusterIndexPage.hardwareResourceGauge.units.cores', { count: g.total }) };
+
+  if (cluster.value === id) {
+    capacity.value = {
+      ...c, cores: cores(c.cores) as Gauge, cpuUsed: cores(c.cpuUsed)
+    };
+  }
+}
+
 watch(cluster, async(id) => {
   capacity.value = null;
   error.value = '';
@@ -41,16 +55,18 @@ watch(cluster, async(id) => {
   }
 
   try {
-    const c = await fetchClusterCapacity(store, id);
-    const cores = (g: Gauge | null) => g && { ...g, units: t('clusterIndexPage.hardwareResourceGauge.units.cores', { count: g.total }) };
-
-    capacity.value = {
-      ...c, cores: cores(c.cores) as Gauge, cpuUsed: cores(c.cpuUsed)
-    };
+    await readCapacity(id);
   } catch (e) {
     error.value = t('configurableViews.errors.capacity', { cluster: id });
   }
 }, { immediate: true });
+
+// A read that fails leaves the gauges as they are.
+usePolling(() => {
+  if (cluster.value && !error.value) {
+    readCapacity(cluster.value).catch(() => undefined);
+  }
+}, POLL_MS);
 </script>
 
 <template>

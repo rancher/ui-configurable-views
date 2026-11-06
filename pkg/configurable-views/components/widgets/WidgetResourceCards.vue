@@ -4,10 +4,11 @@ import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import ResourceSummary from '@shell/components/ResourceSummary.vue';
 import ResourceStatusCards from '@shell/pages/c/_cluster/explorer/resource-status/ResourceStatusCards.vue';
-import { NODE, WORKLOAD_TYPES } from '@shell/config/types';
+import { COUNT, NODE, WORKLOAD_TYPES } from '@shell/config/types';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
 import WidgetCard from './WidgetCard.vue';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
+import { useClusterChanges } from '../../composables/useClusterChanges';
 import { fetchClusterCounts, summarizeCounts, totalCounts } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -16,7 +17,7 @@ import type { WidgetSpec } from '../../templating/types';
 // On the cluster Rancher has open this IS the dashboard's ResourceStatusCards. Those read the `cluster`
 // store, which holds only that cluster, so for any other cluster the widget draws Rancher's
 // ResourceSummary - Total Resources, Nodes, Deployments - from that cluster's own counts, through its
-// `spoofedCounts`.
+// `spoofedCounts`, and reads them again when they change.
 
 const props = defineProps<{ widget: WidgetSpec }>();
 
@@ -30,11 +31,14 @@ type Counts = Record<string, { summary?: { count?: number; states?: Record<strin
 const counts = ref<Counts | null>(null);
 const error = ref('');
 
-watch([cluster, isOpen], async([id, open]) => {
+// The open cluster's cards are stock's to read.
+const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
+
+watch(readFrom, async(id) => {
   counts.value = null;
   error.value = '';
 
-  if (!id || open) {
+  if (!id) {
     return;
   }
 
@@ -44,6 +48,17 @@ watch([cluster, isOpen], async([id, open]) => {
     error.value = t('configurableViews.errors.counts', { cluster: id });
   }
 }, { immediate: true });
+
+// A read that fails leaves the cards as they are.
+useClusterChanges(() => ({ cluster: readFrom.value, type: COUNT }), () => {
+  const id = readFrom.value;
+
+  fetchClusterCounts(store, id).then((found) => {
+    if (readFrom.value === id) {
+      counts.value = found;
+    }
+  }).catch(() => undefined);
+});
 
 /** A card for one type, linking to that type's list in the widget's cluster. */
 function card(resource: string) {

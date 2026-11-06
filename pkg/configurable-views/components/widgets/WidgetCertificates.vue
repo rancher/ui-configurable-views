@@ -14,6 +14,7 @@ import { TYPES } from '@shell/models/secret';
 import { STATES_ENUM } from '@shell/plugins/dashboard-store/resource-class';
 import { PaginationParamFilter } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
+import { useClusterChanges } from '../../composables/useClusterChanges';
 import { fetchClusterRows, objectRoute } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -25,9 +26,10 @@ import type { WidgetSpec } from '../../templating/types';
 // first, its search, grouping and bulk actions - with nothing around it.
 //
 // That component reads the `cluster` store, which holds only the open cluster. For any other cluster
-// the widget reads the TLS secrets itself and draws them in the same bare table, with the same
-// columns and banners. It reads EVERY one and pages in the browser, as the dashboard does: the order
-// that matters is by expiry, which comes out of the certificate itself, so no server can sort by it.
+// the widget reads the TLS secrets itself, and again when they change, and draws them in the same bare
+// table, with the same columns and banners. It reads EVERY one and pages in the browser, as the
+// dashboard does: the order that matters is by expiry, which comes out of the certificate itself, so no
+// server can sort by it.
 // Its rows are Secret models - where the expiry, domain and state are worked out - loaded from another
 // cluster's API, so the bulk actions are left off rather than pointed at the wrong store.
 
@@ -70,31 +72,44 @@ const TLS = [PaginationParamFilter.createSingleField({
   field: 'metadata.fields.1', value: TYPES.TLS, exact: true, equals: true
 })];
 
+async function readCerts(id: string): Promise<void> {
+  const res = await fetchClusterRows<Cert>(store, {
+    resource: SECRET, cluster: id, filters: TLS
+  });
+
+  if (cluster.value === id) {
+    certs.value = res.rows;
+    truncated.value = res.truncated;
+  }
+}
+
 // The open cluster's certificates are the stock list's to read.
-watch([cluster, isOpen], async([id, open]) => {
+const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
+
+watch(readFrom, async(id) => {
   certs.value = [];
   error.value = '';
   truncated.value = false;
 
-  if (!id || open) {
+  if (!id) {
     return;
   }
 
   loading.value = true;
 
   try {
-    const res = await fetchClusterRows<Cert>(store, {
-      resource: SECRET, cluster: id, filters: TLS
-    });
-
-    certs.value = res.rows;
-    truncated.value = res.truncated;
+    await readCerts(id);
   } catch (e) {
     error.value = t('configurableViews.errors.certificates', { cluster: id });
   } finally {
     loading.value = false;
   }
 }, { immediate: true });
+
+// A read that fails leaves the list as it is.
+useClusterChanges(() => ({ cluster: readFrom.value, type: SECRET }), () => {
+  readCerts(readFrom.value).catch(() => undefined);
+});
 
 const headers = [
   {

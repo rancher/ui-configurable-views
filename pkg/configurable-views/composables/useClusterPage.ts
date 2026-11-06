@@ -39,6 +39,7 @@ export function useClusterPage(query: () => ClusterPageQuery) {
   const serverPaged = ref(false);
   const page = ref(1);
   let lastKey = '';
+  let lastPageSize = 0;
 
   async function load(pagination?: { page?: number; perPage?: number }): Promise<void> {
     const q = query();
@@ -59,6 +60,7 @@ export function useClusterPage(query: () => ClusterPageQuery) {
     }
 
     lastKey = key;
+    lastPageSize = pageSize;
     page.value = pageNo;
     loading.value = true;
     error.value = '';
@@ -87,6 +89,37 @@ export function useClusterPage(query: () => ClusterPageQuery) {
     }
   }
 
+  /**
+   * Ask the same question again, because the answer has changed. In place: nothing shows as loading, and
+   * a read that fails leaves the rows as they are.
+   */
+  async function refresh(): Promise<void> {
+    const q = query();
+    const asked = lastKey;
+
+    if (!q.cluster || !asked || loading.value) {
+      return;
+    }
+
+    try {
+      const res = await fetchClusterPage(store, {
+        resource: q.resource,
+        cluster:  q.cluster,
+        page:     page.value,
+        pageSize: lastPageSize,
+        sort:     q.sort,
+        whole:    q.whole,
+      });
+
+      if (asked === lastKey) {
+        rows.value = res.rows;
+        count.value = res.count;
+        truncated.value = res.truncated;
+        serverPaged.value = res.serverPaged;
+      }
+    } catch (e) {}
+  }
+
   // A different question starts again at page one.
   watch(() => JSON.stringify(query()), () => {
     page.value = 1;
@@ -94,6 +127,6 @@ export function useClusterPage(query: () => ClusterPageQuery) {
   }, { immediate: true });
 
   return {
-    rows, count, loading, error, truncated, serverPaged, load
+    rows, count, loading, error, truncated, serverPaged, load, refresh
   };
 }

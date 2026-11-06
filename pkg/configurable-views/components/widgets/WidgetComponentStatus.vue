@@ -5,6 +5,7 @@ import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import WidgetCard from './WidgetCard.vue';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
+import { usePolling } from '../../composables/usePolling';
 import { fetchComponentHealth, fetchAgentHealth, expectedAgents, type ServiceStatus } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -16,8 +17,11 @@ import type { WidgetSpec } from '../../templating/types';
 // A chip that is not healthy explains itself on hover; an agent chip then links to its deployment,
 // in this widget's cluster.
 //
-// Like the dashboard, the agent chips spin while they are read and the rest do not wait for them:
-// a cluster whose agent is down takes its time to say so.
+// Like the dashboard, the agent chips spin while they are first read and the rest do not wait for
+// them: a cluster whose agent is down takes its time to say so. It polls, and a chip keeps what it says
+// until the next answer.
+
+const POLL_MS = 30000;
 
 const ICONS: Record<string, string> = {
   healthy:   'icon-checkmark',
@@ -43,6 +47,25 @@ const services = computed(() => [
   ...Object.values(agents.value).filter((a): a is ServiceStatus => !!a),
 ]);
 
+/** Each agent settles on its own. */
+function readAgents(id: string): void {
+  expectedAgents(id).forEach((name) => {
+    fetchAgentHealth(store, id, name).then((status) => {
+      if (cluster.value === id) {
+        agents.value = { ...agents.value, [name]: status };
+      }
+    });
+  });
+}
+
+async function readComponents(id: string): Promise<void> {
+  const found = await fetchComponentHealth(store, id);
+
+  if (cluster.value === id) {
+    components.value = found;
+  }
+}
+
 watch(cluster, async(id) => {
   components.value = null;
   agents.value = {};
@@ -52,28 +75,24 @@ watch(cluster, async(id) => {
     return;
   }
 
-  // Each agent spins from the start and settles on its own.
-  const expected = expectedAgents(id);
-
-  agents.value = Object.fromEntries(expected.map((name) => [name, { name, state: 'loading' }]));
-  expected.forEach((name) => {
-    fetchAgentHealth(store, id, name).then((status) => {
-      if (cluster.value === id) {
-        agents.value = { ...agents.value, [name]: status };
-      }
-    });
-  });
+  // Each agent spins from the start.
+  agents.value = Object.fromEntries(expectedAgents(id).map((name) => [name, { name, state: 'loading' }]));
+  readAgents(id);
 
   try {
-    const found = await fetchComponentHealth(store, id);
-
-    if (cluster.value === id) {
-      components.value = found;
-    }
+    await readComponents(id);
   } catch (e) {
     error.value = t('configurableViews.errors.componentStatus', { cluster: id });
   }
 }, { immediate: true });
+
+// A read that fails leaves the chips as they are.
+usePolling(() => {
+  if (cluster.value && !error.value) {
+    readAgents(cluster.value);
+    readComponents(cluster.value).catch(() => undefined);
+  }
+}, POLL_MS);
 
 function tooltip(s: ServiceStatus): string | undefined {
   return s.tooltip || (s.tooltipKey ? t(s.tooltipKey) : undefined);
