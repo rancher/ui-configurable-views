@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useStore } from 'vuex';
-import { CAPI, LOCAL_CLUSTER, MANAGEMENT } from '@shell/config/types';
+import { CAPI, CATALOG, LOCAL_CLUSTER, MANAGEMENT } from '@shell/config/types';
 import { useI18n } from '@shell/composables/useI18n';
 import PaginatedResourceTable from '@shell/components/PaginatedResourceTable.vue';
 import ResourceTable from '@shell/components/ResourceTable.vue';
@@ -50,6 +50,12 @@ const downstream = computed(() => !!props.widget.fromCluster);
  * has only its CRD's columns: its id for a name, and no provider, version or machines.
  */
 const listed = computed(() => (!downstream.value && props.widget.resource === CAPI.RANCHER_CLUSTER ? MANAGEMENT.CLUSTER : props.widget.resource));
+
+/**
+ * The shell's App model reads the open cluster to draw a row, and throws without one, which leaves the
+ * table blank. A Home loaded fresh has none, so the table says what it needs until a cluster is opened.
+ */
+const needsOpenCluster = computed(() => listed.value === CATALOG.APP && !store.getters['currentCluster']);
 
 /**
  * The schema of a type as the widget's cluster serves it. Rows read from a cluster are drawn with that
@@ -115,7 +121,7 @@ const {
 } = useClusterPage(() => ({
   resource: props.widget.resource,
   // A global type is not read here at all - its table fetches for itself.
-  cluster:  downstream.value ? cluster.value : '',
+  cluster:  downstream.value && !needsOpenCluster.value ? cluster.value : '',
   perPage:  PER_PAGE,
   whole:    true,
 }));
@@ -144,9 +150,21 @@ const count = computed<number | null>(() => {
   return (store.getters['management/all']?.(listed.value) || []).length;
 });
 
+const rancherMessage = computed(() => {
+  if (needsOpenCluster.value) {
+    return t('configurableViews.widget.appsNeedCluster');
+  }
+
+  return schema.value ? '' : t('configurableViews.widget.noType', { type: props.widget.resource });
+});
+
 const downstreamMessage = computed(() => {
   if (!cluster.value) {
     return t(NO_CLUSTER);
+  }
+
+  if (needsOpenCluster.value) {
+    return t('configurableViews.widget.appsNeedCluster');
   }
 
   return rowsError.value || (clusterSchemaLoading.value || schema.value ? '' : t('configurableViews.widget.noType', { type: props.widget.resource }));
@@ -191,10 +209,9 @@ const downstreamMessage = computed(() => {
     v-else
     :title="widget.title"
     :count="widget.title && schema ? count : null"
-    :error="schema ? '' : t('configurableViews.widget.noType', { type: widget.resource })"
+    :error="rancherMessage"
   >
     <PaginatedResourceTable
-      v-if="schema"
       :key="tableKey"
       :schema="schema"
       :headers="headers"

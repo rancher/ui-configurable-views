@@ -593,9 +593,21 @@ export function columnsLinkingTo(headers: TableColumn[], cluster: string, ownPag
       };
     }
 
-    // A management cluster links to its provisioning cluster, when that is loaded.
+    // A management cluster links to its provisioning cluster. The row names it, so that list need not be loaded.
     if (header.formatter === 'ClusterLink') {
-      return { ...header, formatterOpts: { ...opts, getCustomDetailLink: (row: ResourceRow) => locationIn(cluster, get(row, 'provCluster.detailLocation')) } };
+      return {
+        ...header,
+        formatterOpts: {
+          ...opts,
+          getCustomDetailLink: (row: ResourceRow) => {
+            const [namespace, name] = `${ row.provClusterId || '' }`.split('/');
+
+            return objectRoute(cluster, {
+              kind: 'Cluster', apiVersion: 'provisioning.cattle.io/v1', name, namespace
+            });
+          },
+        },
+      };
     }
 
     if (!ownPage && (header.formatter === 'LinkName' || header.formatter === 'LinkNamePopover')) {

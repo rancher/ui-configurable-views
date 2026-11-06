@@ -292,25 +292,16 @@ describe('columnsLinkingTo', () => {
     expect(linkOf(claim, {})).toBeNull();
   });
 
-  it('sends a management cluster to its provisioning cluster, when it is loaded', () => {
+  it('sends a management cluster to the provisioning cluster it names, with nothing else loaded', () => {
     const [name] = columnsLinkingTo([{
       name: 'name', value: 'nameDisplay', formatter: 'ClusterLink'
     }], 'local', false);
-    const row = {
-      provCluster: {
-        detailLocation: {
-          name:   'c-cluster-product-resource-namespace-id',
-          params: {
-            product: 'home', cluster: 'c-open', resource: 'provisioning.cattle.io.cluster', namespace: 'fleet-default', id: 'one'
-          },
-        }
-      }
-    };
 
-    expect(linkOf(name, row)).toMatchObject({
+    expect(linkOf(name, { provClusterId: 'fleet-default/c-fmv4t' })).toStrictEqual({
+      name:   'c-cluster-product-resource-namespace-id',
       params: {
-        product: 'explorer', cluster: 'local', id: 'one'
-      }
+        cluster: 'local', product: 'explorer', resource: 'provisioning.cattle.io.cluster', id: 'c-fmv4t', namespace: 'fleet-default'
+      },
     });
     expect(linkOf(name, {})).toBeNull();
   });
