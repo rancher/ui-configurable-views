@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref, type Ref } from 'vue';
+import type { Ref } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
 import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
@@ -232,32 +232,6 @@ export function useViewActions(
 
   // ---- delete, and undo ----
 
-  /** A deleted view, offered back for a while. See deleteView. */
-  const undo = ref<{ title: string, message: string, run:() => Promise<void> } | null>(null);
-  let undoTimer: ReturnType<typeof setTimeout> | undefined;
-
-  function closeUndo(): void {
-    clearTimeout(undoTimer);
-    undo.value = null;
-  }
-
-  function offerUndo(title: string, message: string, run: () => Promise<void>): void {
-    closeUndo();
-    undo.value = {
-      title, message, run
-    };
-    undoTimer = setTimeout(closeUndo, UNDO_TIMEOUT);
-  }
-
-  onBeforeUnmount(() => clearTimeout(undoTimer));
-
-  async function runUndo(): Promise<void> {
-    const pending = undo.value;
-
-    closeUndo();
-    await pending?.run();
-  }
-
   /**
    * Deleted at once and offered back, rather than confirmed first. Undo restores its place and whether
    * it was your default. A published view is not deleted but unpublished (see unpublishView).
@@ -307,16 +281,24 @@ export function useViewActions(
       bar.value?.focusTab(neighbour.id);
     }
 
-    offerUndo(t('configurableViews.bar.deleted'), t('configurableViews.bar.deletedMessage', { name: removed.name }, true), async() => {
-      const now = pageViews.userDraft();
+    store.dispatch('growl/success', {
+      title:   t('configurableViews.bar.deleted'),
+      message: t('configurableViews.bar.deletedMessage', { name: removed.name }, true),
+      timeout: UNDO_TIMEOUT,
+      action:  {
+        label: t('configurableViews.bar.undo'),
+        run:   async() => {
+          const now = pageViews.userDraft();
 
-      now.views.splice(Math.min(at, now.views.length), 0, removed);
+          now.views.splice(Math.min(at, now.views.length), 0, removed);
 
-      if (wasDefault) {
-        now.defaultViewId = removed.id;
-      }
+          if (wasDefault) {
+            now.defaultViewId = removed.id;
+          }
 
-      await pageViews.persist(now, wasActive ? removed.id : activeViewId.value);
+          await pageViews.persist(now, wasActive ? removed.id : activeViewId.value);
+        },
+      },
     });
   }
 
@@ -328,8 +310,5 @@ export function useViewActions(
     publishView,
     unpublishView,
     deleteView,
-    undo,
-    closeUndo,
-    runUndo,
   };
 }

@@ -8,7 +8,6 @@ import WidgetGrid from './WidgetGrid.vue';
 import ViewBar from './ViewBar.vue';
 import EditViewSidebar from './EditViewSidebar.vue';
 import WidgetSettingsModal from './WidgetSettingsModal.vue';
-import UndoGrowl from './UndoGrowl.vue';
 import { useConfirm } from '../composables/useConfirm';
 import { loadViewBar, viewBarLocked, viewBarVisible } from '../composables/useViewBarVisibility';
 import { usePageViews } from '../composables/usePageViews';
@@ -81,7 +80,7 @@ const {
 } = useEditSession(pageViews, props, store, t, confirm);
 
 const {
-  renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView, undo, closeUndo, runUndo,
+  renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView,
 } = useViewActions(pageViews, props, store, t, confirm, bar, leaveEdit);
 
 const {
@@ -203,13 +202,6 @@ const barListeners = {
       class="view-host__stock"
       :class="{ 'view-host__unpadded': layout === 'home' }"
     />
-    <UndoGrowl
-      v-if="undo"
-      :title="undo.title"
-      :message="undo.message"
-      @undo="runUndo"
-      @close="closeUndo"
-    />
   </template>
 
   <div
@@ -303,13 +295,6 @@ const barListeners = {
       @done="applySettings"
       @cancel="closeSettings"
       @remove="removeConfigured"
-    />
-    <UndoGrowl
-      v-if="undo"
-      :title="undo.title"
-      :message="undo.message"
-      @undo="runUndo"
-      @close="closeUndo"
     />
   </div>
 </template>
