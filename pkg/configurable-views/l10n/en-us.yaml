@@ -143,7 +143,7 @@ configurableViews:
     noMonitoring: "{what} come from Rancher’s monitoring, which this cluster does not have."
     noExtensionCards: No extension adds a card to this cluster’s dashboard.
     noType: "Rancher has no “{type}” here — the type may not be installed, or you may not have permission to see it."
-    appsNeedCluster: Rancher can only list apps once a cluster has been opened. Open any cluster, then come back to this page.
+    needsOpenCluster: Rancher can only list {type} once a cluster has been opened. Open any cluster, then come back to this page.
     certsTruncated: This cluster has more certificates than are read at once, so the list is ordered over the first of them.
     tabs:
       empty: Nothing in this tab yet.

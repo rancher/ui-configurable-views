@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useStore } from 'vuex';
-import { CAPI, CATALOG, LOCAL_CLUSTER, MANAGEMENT } from '@shell/config/types';
+import {
+  CAPI, CATALOG, INGRESS, LOCAL_CLUSTER, MANAGEMENT
+} from '@shell/config/types';
 import { useI18n } from '@shell/composables/useI18n';
 import PaginatedResourceTable from '@shell/components/PaginatedResourceTable.vue';
 import WidgetCard from './WidgetCard.vue';
@@ -50,10 +52,13 @@ const isOpen = useOpenCluster(cluster);
 const listed = computed(() => (!downstream.value && props.widget.resource === CAPI.RANCHER_CLUSTER ? MANAGEMENT.CLUSTER : props.widget.resource));
 
 /**
- * The shell's App model reads the open cluster to draw a row, and throws without one, which leaves the
- * table blank. A Home loaded fresh has none, so the table says what it needs until a cluster is opened.
+ * Types whose shell model reads the open cluster to draw a row, and throws without one, which leaves the
+ * table blank: an App reads its worker OSs, and an Ingress which fields its schema has. A Home loaded
+ * fresh has none, so the table says what it needs until a cluster is opened.
  */
-const needsOpenCluster = computed(() => listed.value === CATALOG.APP && !store.getters['currentCluster']);
+const NEED_OPEN_CLUSTER: string[] = [CATALOG.APP, INGRESS];
+
+const needsOpenCluster = computed(() => NEED_OPEN_CLUSTER.includes(listed.value) && !store.getters['currentCluster']);
 
 // A cluster that is not the open one is read through a store of its own, made the first time a table
 // asks for it.
@@ -155,7 +160,7 @@ const message = computed(() => {
   }
 
   if (needsOpenCluster.value) {
-    return t('configurableViews.widget.appsNeedCluster');
+    return t('configurableViews.widget.needsOpenCluster', { type: t(`typeLabel."${ listed.value }"`, { count: 2 })?.trim() || listed.value });
   }
 
   if (ownStoreError.value) {
@@ -173,7 +178,7 @@ const message = computed(() => {
 <template>
   <WidgetCard
     :title="widget.title"
-    :count="widget.title ? count : null"
+    :count="widget.title && !message ? count : null"
     :loading="loadingStore"
     :error="message"
   >

@@ -94,6 +94,32 @@ describe('a table widget', () => {
     expect(mockPageLikeItsList).toHaveBeenCalledWith(store, 'cv-c-2', 'pod');
   });
 
+  it.each([
+    ['an App', 'catalog.cattle.io.app'],
+    ['an Ingress', 'networking.k8s.io.ingress'],
+  ])('says a table of %s needs a cluster opened, with no count beside it, on a Home with none, because the shell cannot draw its rows', (_, resource) => {
+    const store = storeWith('');
+
+    store.getters.currentCluster = null;
+    store.getters.clusterReady = false;
+    // Rancher serves the type, and holds none of it while its table isn't drawn.
+    store.getters['management/schemaFor'] = (type: string) => ({ id: type, store: 'management' });
+
+    const fromRancher = table({
+      resource, title: 'Rows', fromCluster: false
+    }, store);
+    const fromCluster = table({
+      resource, title: 'Rows', fromCluster: true, cluster: 'c-2'
+    }, store);
+
+    [fromRancher, fromCluster].forEach(({ wrapper, rows }) => {
+      expect(wrapper.text()).toContain('configurableViews.widget.needsOpenCluster');
+      expect(wrapper.findComponent(WidgetCard).props('count')).toBeNull();
+      expect(rows().exists()).toBe(false);
+    });
+    expect(mockClusterStore).not.toHaveBeenCalled();
+  });
+
   it('says so when another cluster cannot be read', async() => {
     mockClusterStore.mockRejectedValue(new Error('503'));
 
