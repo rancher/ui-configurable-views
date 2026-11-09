@@ -2,7 +2,8 @@ import type { Component } from 'vue';
 import {
   WIDGET_TABLE, WIDGET_LINKS, WIDGET_BANNER, WIDGET_CLUSTER_TABLE, WIDGET_OVERVIEW,
   WIDGET_CLUSTER_HEADER, WIDGET_RESOURCE_CARDS, WIDGET_CAPACITY, WIDGET_EVENTS, WIDGET_CERTIFICATES,
-  WIDGET_COMPONENT_STATUS, WIDGET_TABS, WIDGET_ALERTS, WIDGET_METRICS, WIDGET_EXTENSION_CARDS
+  WIDGET_COMPONENT_STATUS, WIDGET_TABS, WIDGET_ALERTS, WIDGET_METRICS, WIDGET_EXTENSION_CARDS, WIDGET_STATUS_CARDS,
+  WIDGET_GENERATED
 } from '../../templating/widget-catalog';
 import WidgetTable from './WidgetTable.vue';
 import WidgetLinks from './WidgetLinks.vue';
@@ -19,11 +20,14 @@ import WidgetTabs from './WidgetTabs.vue';
 import WidgetAlerts from './WidgetAlerts.vue';
 import WidgetMetrics from './WidgetMetrics.vue';
 import WidgetExtensionCards from './WidgetExtensionCards.vue';
+import WidgetStatusCards from './WidgetStatusCards.vue';
+import WidgetGenerated from './WidgetGenerated.vue';
 import TableSettings from './settings/TableSettings.vue';
 import LinksSettings from './settings/LinksSettings.vue';
 import BannerSettings from './settings/BannerSettings.vue';
 import MetricsSettings from './settings/MetricsSettings.vue';
 import TabsSettings from './settings/TabsSettings.vue';
+import StatusCardsSettings from './settings/StatusCardsSettings.vue';
 
 /** What a kind of widget brings with it: how it is drawn, and how it is set up. */
 export interface WidgetDefinition {
@@ -73,4 +77,9 @@ export const WIDGETS: Record<string, WidgetDefinition> = {
     component: WidgetMetrics, settings: MetricsSettings, source: 'cluster'
   },
   [WIDGET_EXTENSION_CARDS]: { component: WidgetExtensionCards, source: 'cluster' },
+  [WIDGET_STATUS_CARDS]:    {
+    component: WidgetStatusCards, settings: StatusCardsSettings, source: 'cluster', pluralName: true
+  },
+  // A widget Liz wrote: its code is approved by an admin first (see GeneratedWidgetsAdmin).
+  [WIDGET_GENERATED]: { component: WidgetGenerated, source: 'cluster' },
 };

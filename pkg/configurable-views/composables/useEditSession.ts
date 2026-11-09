@@ -27,7 +27,7 @@ export function useEditSession(
 ) {
   const {
     editing, working, savedBaseline, activeViewId, pinnedView, selectedNodeId, newViewId, startedFrom,
-    settingsNodeId, saving, drawerOpen, error, orgViews, orgTemplate, activeView, views, dirty,
+    settingsNodeId, saving, drawerOpen, error, orgViews, activeView, views, dirty,
   } = pageViews;
 
   /**
@@ -186,8 +186,8 @@ export function useEditSession(
   }
 
   /**
-   * A new view starts from the organization template when there is one — the design's "From the
-   * organization template. Not saved yet."
+   * A new view starts empty. The starting points on it (see startFrom) put Rancher's own page or a copy
+   * of another view on it instead.
    */
   function newView(): void {
     if (!editing.value) {
@@ -200,18 +200,12 @@ export function useEditSession(
       return;
     }
 
-    const template = orgTemplate.value;
-    const view: LayoutView = template ? {
-      ...clone(template), id: newId('view'), name: t('configurableViews.page.untitled')
-    } : newLayoutView(t('configurableViews.page.untitled'));
-
-    delete view.org;
-    delete view.from;
+    const view: LayoutView = newLayoutView(t('configurableViews.page.untitled'));
 
     draft.views.push(view);
     pageViews.setActiveView(view.id);
     newViewId.value = view.id;
-    startedFrom.value = template ? t('configurableViews.page.orgTemplate') : '';
+    startedFrom.value = '';
   }
 
   const stockStartLabel = computed(() => t('configurableViews.sidebar.startStock', { page: props.title }));
