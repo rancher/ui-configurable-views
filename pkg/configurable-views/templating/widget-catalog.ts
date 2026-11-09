@@ -252,13 +252,3 @@ export function searchCatalog(list: CatalogEntry[], query: string, textOf: (entr
 
   return list.filter((entry) => textOf(entry).toLowerCase().includes(needle));
 }
-
-/**
- * The context a table from Rancher pages under: the Home's own.
- *
- * What limits paging is the shell's list of types for the store, not the context. For the `management`
- * store that list is short: under this context, both kinds of cluster and secrets, the most of any
- * context, with the server-side columns their sorting and filtering need. Any other type is read whole
- * and paged in the browser. The package registers no paging of its own.
- */
-export const PAGINATION_CONTEXT = 'home';

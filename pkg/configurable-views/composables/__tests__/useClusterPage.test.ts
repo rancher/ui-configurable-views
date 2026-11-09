@@ -12,8 +12,10 @@ jest.mock('vuex', () => ({
   }),
 }));
 
-const answer = (ids: string[]) => ({ data: ids.map((id) => ({ id })), pagination: { result: { count: ids.length } } });
+const answer = (ids: string[], revision?: string) => ({ data: ids.map((id) => ({ id })), pagination: { result: { count: ids.length, revision } } });
 const settled = () => new Promise((resolve) => setTimeout(resolve));
+// Long enough for a read after a change to be made: the shell's back-off waits a moment before the first.
+const readStarted = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe('useClusterPage refresh', () => {
   function reading(cluster = 'c-1') {
@@ -23,7 +25,7 @@ describe('useClusterPage refresh', () => {
     mount(defineComponent({
       setup() {
         page = useClusterPage(() => ({
-          resource: 'pod', cluster: from.value, perPage: 10, whole: true
+          resource: 'pod', cluster: from.value, perPage: 10
         }));
 
         return () => null;
@@ -83,6 +85,7 @@ describe('useClusterPage refresh', () => {
 
     const refreshed = page.refresh();
 
+    await readStarted();
     mockFindPage.mockResolvedValue(answer(['c']));
     from.value = 'c-2';
     await nextTick();
@@ -92,6 +95,23 @@ describe('useClusterPage refresh', () => {
     await refreshed;
 
     expect(page.rows.value.map((r) => r.id)).toStrictEqual(['c']);
+  });
+
+  it('asks for the revision the type changed at, and lets a change older than its rows go', async() => {
+    mockFindPage.mockResolvedValue(answer(['a'], '5'));
+
+    const { page } = reading();
+
+    await settled();
+    mockFindPage.mockResolvedValue(answer(['a', 'b'], '7'));
+    await page.refresh('7');
+
+    expect(mockFindPage.mock.calls[1][1].opt.revision).toBe('7');
+    expect(page.rows.value.map((r) => r.id)).toStrictEqual(['a', 'b']);
+
+    await page.refresh('6');
+
+    expect(mockFindPage).toHaveBeenCalledTimes(2);
   });
 
   it('reads nothing with no cluster', async() => {

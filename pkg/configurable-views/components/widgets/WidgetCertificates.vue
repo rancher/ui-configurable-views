@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue';
+import {
+  computed, provide, ref, useId, watch
+} from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -14,7 +16,7 @@ import { TYPES } from '@shell/models/secret';
 import { STATES_ENUM } from '@shell/plugins/dashboard-store/resource-class';
 import { PaginationParamFilter } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { useClusterChanges } from '../../composables/useClusterChanges';
+import { readChange, useClusterChanges } from '../../composables/useClusterChanges';
 import { fetchClusterRows, objectRoute } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -72,14 +74,22 @@ const TLS = [PaginationParamFilter.createSingleField({
   field: 'metadata.fields.1', value: TYPES.TLS, exact: true, equals: true
 })];
 
-async function readCerts(id: string): Promise<void> {
-  const res = await fetchClusterRows<Cert>(store, {
-    resource: SECRET, cluster: id, filters: TLS
-  });
+/** The secrets' revision the certificates were read at. */
+let revision: string | undefined;
+// This widget's reads after a change, apart from every other's (see readChange).
+const reader = useId();
 
-  if (cluster.value === id) {
+/** A cluster's certificates, as of the revision `at` at least. */
+const readCerts = (id: string, at?: string) => fetchClusterRows<Cert>(store, {
+  resource: SECRET, cluster: id, filters: TLS, revision: at
+});
+
+/** Show what was read, unless the widget has moved to another cluster since. */
+function showCerts(id: string, res?: { rows: Cert[]; truncated: boolean; revision?: string }): void {
+  if (res && cluster.value === id) {
     certs.value = res.rows;
     truncated.value = res.truncated;
+    revision = res.revision;
   }
 }
 
@@ -90,6 +100,7 @@ watch(readFrom, async(id) => {
   certs.value = [];
   error.value = '';
   truncated.value = false;
+  revision = undefined;
 
   if (!id) {
     return;
@@ -98,7 +109,7 @@ watch(readFrom, async(id) => {
   loading.value = true;
 
   try {
-    await readCerts(id);
+    showCerts(id, await readCerts(id));
   } catch (e) {
     error.value = t('configurableViews.errors.certificates', { cluster: id });
   } finally {
@@ -107,8 +118,15 @@ watch(readFrom, async(id) => {
 }, { immediate: true });
 
 // A read that fails leaves the list as it is.
-useClusterChanges(() => ({ cluster: readFrom.value, type: SECRET }), () => {
-  readCerts(readFrom.value).catch(() => undefined);
+useClusterChanges(() => ({ cluster: readFrom.value, type: SECRET }), (changedAt) => {
+  const id = readFrom.value;
+
+  readChange({
+    id:       `configurable-views/${ id }/${ SECRET }/${ reader }`,
+    revision: changedAt,
+    last:     revision,
+    read:     (at) => readCerts(id, at),
+  }).then((res) => showCerts(id, res)).catch(() => undefined);
 });
 
 const headers = [

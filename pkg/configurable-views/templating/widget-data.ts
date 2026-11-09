@@ -63,16 +63,6 @@ export async function fetchClusterSchemas(store: VuexStore, cluster: string): Pr
   return Promise.all((res?.data || []).map((raw: TypeSchema) => store.dispatch('management/create', raw)));
 }
 
-/**
- * One type's schema, as that cluster serves it. Two clusters can serve the same type with different
- * columns, so a table of a cluster's rows draws that cluster's. null when it does not serve the type.
- */
-export async function fetchClusterSchema(store: VuexStore, cluster: string, type: string): Promise<TypeSchema | null> {
-  const raw = await store.dispatch('management/request', { url: clusterUrl(cluster, `schemas/${ encodeURIComponent(type) }`), redirectUnauthorized: false });
-
-  return raw?.id ? store.dispatch('management/create', raw) : null;
-}
-
 export interface ClusterPageArgs {
   resource: string;
   cluster: string;
@@ -84,13 +74,16 @@ export interface ClusterPageArgs {
   /** Read up to `cap` rows at once instead of a page. */
   whole?: boolean;
   cap?: number;
+  /** Read the type as of this revision at least: after a change, the revision it changed at (see readChange). */
+  revision?: string;
 }
 
 export interface ClusterPage {
   rows: ResourceRow[];
   count: number;
   truncated: boolean;
-  serverPaged: boolean;
+  /** The type's revision the rows were read at. */
+  revision?: string;
 }
 
 /**
@@ -101,16 +94,16 @@ export interface ClusterPage {
  * names a single cluster and gets real pagination — the backend is asked for that page and returns
  * it with the total count.
  *
- * Or `whole`: up to `cap` rows at once, for a table that pages, sorts and filters them itself (the
- * table views do, and only see what they hold). `truncated` says when the cluster had more, because a
- * total that quietly stops being a total is worse than a visible limit.
+ * Or `whole`: up to `cap` rows at once, for a list in an order the server cannot sort by (see
+ * fetchClusterRows). `truncated` says when the cluster had more, because a total that quietly stops
+ * being a total is worse than a visible limit.
  */
 export async function fetchClusterPage(store: VuexStore, {
-  resource, cluster, page = 1, pageSize = 10, sort = [], filters = [], whole = false, cap = 500
+  resource, cluster, page = 1, pageSize = 10, sort = [], filters = [], whole = false, cap = 500, revision
 }: ClusterPageArgs): Promise<ClusterPage> {
   if (!resource || !cluster) {
     return {
-      rows: [], count: 0, truncated: false, serverPaged: false
+      rows: [], count: 0, truncated: false
     };
   }
 
@@ -123,16 +116,17 @@ export async function fetchClusterPage(store: VuexStore, {
       pagination: {
         page: whole ? 1 : page, pageSize: whole ? cap : pageSize, sort, filters
       },
+      revision,
     },
   });
 
   const count = res?.pagination?.result?.count ?? res?.data?.length ?? 0;
 
   return {
-    rows:        res?.data || [],
-    count:       whole ? (res?.data?.length ?? 0) : count,
-    truncated:   whole && count > cap,
-    serverPaged: !whole,
+    rows:      res?.data || [],
+    count:     whole ? (res?.data?.length ?? 0) : count,
+    truncated: whole && count > cap,
+    revision:  res?.pagination?.result?.revision,
   };
 }
 
@@ -367,13 +361,15 @@ export async function fetchClusterCapacity(store: VuexStore, cluster: string): P
  * cut the list short, so the sort is never quietly over a sample.
  */
 export async function fetchClusterRows<T = ResourceRow>(store: VuexStore, {
-  resource, cluster, filters, cap = 500
-}: { resource: string; cluster: string; filters?: PaginationParamFilter[]; cap?: number }): Promise<{ rows: T[]; truncated: boolean }> {
-  const { rows, truncated } = await fetchClusterPage(store, {
-    resource, cluster, filters, cap, whole: true
+  resource, cluster, filters, cap = 500, revision
+}: { resource: string; cluster: string; filters?: PaginationParamFilter[]; cap?: number; revision?: string }): Promise<{ rows: T[]; truncated: boolean; revision?: string }> {
+  const page = await fetchClusterPage(store, {
+    resource, cluster, filters, cap, whole: true, revision
   });
 
-  return { rows: rows as T[], truncated };
+  return {
+    rows: page.rows as T[], truncated: page.truncated, revision: page.revision
+  };
 }
 
 /** One type's state summary in one cluster: counts per state, and per namespace within each. */

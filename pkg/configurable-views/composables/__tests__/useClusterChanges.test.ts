@@ -1,6 +1,7 @@
 import { defineComponent, nextTick, ref, type Ref } from 'vue';
 import { mount } from '@vue/test-utils';
-import { useClusterChanges } from '@pkg/configurable-views/composables/useClusterChanges';
+import { STEVE_RESPONSE_CODE } from '@shell/types/rancher/steve.api';
+import { readChange, useClusterChanges } from '@pkg/configurable-views/composables/useClusterChanges';
 
 interface FakeSocket {
   url: string;
@@ -55,6 +56,10 @@ jest.mock('@shell/utils/socket', () => {
   };
 });
 
+jest.mock('vuex', () => ({ ...jest.requireActual('vuex'), useStore: () => ({ getters: {} }) }));
+// The UI performance setting's wait between change messages.
+jest.mock('@shell/utils/pagination-utils', () => ({ __esModule: true, default: { resourceChangesDebounceMs: () => 4000 } }));
+
 describe('useClusterChanges', () => {
   const wrappers: { unmount(): void }[] = [];
 
@@ -73,7 +78,11 @@ describe('useClusterChanges', () => {
     return { wrapper, onChange };
   }
 
-  const frame = (socket: FakeSocket, name: string, resourceType: string) => socket.fire('message', { data: JSON.stringify({ name, resourceType }) });
+  const frame = (socket: FakeSocket, name: string, resourceType: string, revision?: string) => socket.fire('message', {
+    data: JSON.stringify({
+      name, resourceType, revision
+    })
+  });
 
   const setHidden = (hidden: boolean) => Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
 
@@ -87,15 +96,23 @@ describe('useClusterChanges', () => {
     jest.useRealTimers();
   });
 
-  it('asks for one type on that cluster\'s own socket, for changes only, less often than the shell', () => {
+  it('asks for one type on that cluster\'s own socket, for changes only, as often as the shell\'s lists hear of them', () => {
     listening('c/1', 'pod');
 
     expect(mockSockets).toHaveLength(1);
     expect(mockSockets[0].url).toBe('/k8s/clusters/c%2F1/v1/subscribe');
     expect(mockSockets[0].connected).toBe(true);
     expect(mockSockets[0].sent).toStrictEqual([{
-      resourceType: 'pod', mode: 'resource.changes', debounceMs: 10000
+      resourceType: 'pod', mode: 'resource.changes', debounceMs: 4000
     }]);
+  });
+
+  it('tells the widgets the revision the type changed at', () => {
+    const { onChange } = listening('c-1', 'pod');
+
+    frame(mockSockets[0], 'resource.changes', 'pod', '42');
+
+    expect(onChange).toHaveBeenCalledWith('42');
   });
 
   it('shares one socket and one subscription between the widgets of a cluster, and tells each', () => {
@@ -156,18 +173,18 @@ describe('useClusterChanges', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it('holds a change while the tab is hidden, and tells it once when it shows', () => {
+  it('holds a change while the tab is hidden, and tells it once when it shows, at the last revision', () => {
     const { onChange } = listening('c-1', 'pod');
 
     setHidden(true);
-    frame(mockSockets[0], 'resource.changes', 'pod');
-    frame(mockSockets[0], 'resource.changes', 'pod');
+    frame(mockSockets[0], 'resource.changes', 'pod', '1');
+    frame(mockSockets[0], 'resource.changes', 'pod', '2');
     document.dispatchEvent(new Event('visibilitychange'));
     expect(onChange).not.toHaveBeenCalled();
 
     setHidden(false);
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls).toStrictEqual([['2']]);
   });
 
   it('stops a type with its last listener, and closes the socket with its last type', () => {
@@ -203,5 +220,77 @@ describe('useClusterChanges', () => {
     await nextTick();
     expect(mockSockets).toHaveLength(2);
     expect(mockSockets[0].disconnected).toBe(true);
+  });
+});
+
+describe('reading again after a change', () => {
+  // A server that has not caught up with the revision asked for yet.
+  const BEHIND = { status: 400, code: STEVE_RESPONSE_CODE.UNKNOWN_REVISION };
+
+  it('asks for the revision the type changed at', async() => {
+    const read = jest.fn().mockResolvedValue('rows');
+
+    await expect(readChange({
+      id: 'asks', revision: '10', last: '5', read
+    })).resolves.toBe('rows');
+    expect(read).toHaveBeenCalledWith('10');
+  });
+
+  it('lets a change go that is older than what was last read', async() => {
+    const read = jest.fn();
+
+    await expect(readChange({
+      id: 'older', revision: '4', last: '5', read
+    })).resolves.toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('asks again while the server has not caught up with the change, and not after any other error', async() => {
+    const read = jest.fn().mockRejectedValueOnce(BEHIND).mockResolvedValue('rows');
+
+    await expect(readChange({
+      id: 'behind', revision: '10', read
+    })).resolves.toBe('rows');
+    expect(read).toHaveBeenCalledTimes(2);
+
+    const failing = jest.fn().mockRejectedValue({ status: 500 });
+
+    await expect(readChange({
+      id: 'failing', revision: '10', read: failing
+    })).rejects.toThrow();
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a newer change replace a read still trying for an older one, and an older change go while a newer is read', async() => {
+    const stuck = jest.fn().mockRejectedValue(BEHIND);
+    const first = readChange({
+      id: 'newer', revision: '10', read: stuck
+    });
+    const newer = jest.fn().mockResolvedValue('newer rows');
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(readChange({
+      id: 'newer', revision: '11', read: newer
+    })).resolves.toBe('newer rows');
+    await expect(first).rejects.toThrow();
+    expect(stuck).toHaveBeenCalledTimes(1);
+
+    let finish: (value: string) => void = () => undefined;
+    const pending = readChange({
+      id:       'while',
+      revision: '11',
+      read:     () => new Promise<string>((resolve) => {
+        finish = resolve;
+      })
+    });
+    const older = jest.fn();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(readChange({
+      id: 'while', revision: '10', read: older
+    })).resolves.toBeUndefined();
+    finish('rows');
+    await expect(pending).resolves.toBe('rows');
+    expect(older).not.toHaveBeenCalled();
   });
 });

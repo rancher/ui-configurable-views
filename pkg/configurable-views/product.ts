@@ -2,8 +2,8 @@ import type { ProductChildCustomPage, ProductMetadata } from '@shell/core/plugin
 import { PRODUCT_NAME, PAGE_SETTINGS, PAGE_VIEWS } from './templating/template-engine';
 
 // The "Configurable Views" product - a TOP-LEVEL global product (like Continuous Delivery / Cluster
-// Management), with no cluster switcher. Everything it shows is stored as labeled ConfigMaps (not a
-// CRD).
+// Management), with no cluster switcher. The views published for everyone are stored in a labeled
+// ConfigMap (not a CRD), and each person's own views and switches in their user preferences.
 export const product: ProductMetadata = {
   name:     PRODUCT_NAME,
   labelKey: 'product.configurable-views',

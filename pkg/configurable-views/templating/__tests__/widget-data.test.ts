@@ -1,6 +1,6 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterPage, fetchClusterRows, fetchClusterSchema, fetchClusterSchemas, fetchMetricsBoards, fetchMonitoring,
+  columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterPage, fetchClusterRows, fetchClusterSchemas, fetchMetricsBoards, fetchMonitoring,
   fetchStateSummaries, hasMonitoringApps, objectRoute, summarizeCounts
 } from '@pkg/configurable-views/templating/widget-data';
 
@@ -18,17 +18,17 @@ function storeAnswering(answers: Record<string, unknown>) {
 }
 
 describe('reading a type from one cluster', () => {
-  // A store whose findPage answers with these rows, out of this many.
+  // A store whose findPage answers with these rows, out of this many, as of a revision.
   function storeWithPage(rows: object[], count = rows.length) {
-    const dispatch = jest.fn().mockResolvedValue({ data: rows, pagination: { result: { count } } });
+    const dispatch = jest.fn().mockResolvedValue({ data: rows, pagination: { result: { count, revision: '42' } } });
 
     return { store: { dispatch } as unknown as VuexStore, dispatch };
   }
 
-  it('asks the named cluster for one page', async() => {
+  it('asks the named cluster for one page, as of a revision, and says which revision it read', async() => {
     const { store, dispatch } = storeWithPage([{ id: 'a' }], 30);
     const page = await fetchClusterPage(store, {
-      resource: 'pod', cluster: 'c/1', page: 2, pageSize: 5
+      resource: 'pod', cluster: 'c/1', page: 2, pageSize: 5, revision: '41'
     });
 
     expect(dispatch).toHaveBeenCalledWith('management/findPage', {
@@ -40,10 +40,11 @@ describe('reading a type from one cluster', () => {
         pagination: {
           page: 2, pageSize: 5, sort: [], filters: []
         },
+        revision: '41',
       },
     });
     expect(page).toStrictEqual({
-      rows: [{ id: 'a' }], count: 30, truncated: false, serverPaged: true
+      rows: [{ id: 'a' }], count: 30, truncated: false, revision: '42'
     });
   });
 
@@ -53,7 +54,9 @@ describe('reading a type from one cluster', () => {
 
     await expect(fetchClusterRows(store, {
       resource: 'secret', cluster: 'c-1', filters, cap: 2
-    })).resolves.toStrictEqual({ rows: [{ id: 'a' }, { id: 'b' }], truncated: true });
+    })).resolves.toStrictEqual({
+      rows: [{ id: 'a' }, { id: 'b' }], truncated: true, revision: '42'
+    });
 
     expect(dispatch.mock.calls[0][1].opt.pagination).toStrictEqual({
       page: 1, pageSize: 2, sort: [], filters
@@ -72,19 +75,6 @@ describe('reading a type from one cluster', () => {
 
     await expect(fetchClusterSchemas(store, 'c-1')).resolves.toStrictEqual([{ id: 'pod', canList: true }]);
     expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/k8s/clusters/c-1/v1/schemas' });
-  });
-
-  it('reads one type\'s schema from that cluster, as a model', async() => {
-    const { store, dispatch } = storeWithSchemas({ id: 'example.com.thing' });
-
-    await expect(fetchClusterSchema(store, 'c-1', 'example.com.thing')).resolves.toStrictEqual({ id: 'example.com.thing', canList: true });
-    expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/k8s/clusters/c-1/v1/schemas/example.com.thing', redirectUnauthorized: false });
-  });
-
-  it('has no schema for a type the cluster does not answer for', async() => {
-    const { store } = storeWithSchemas({});
-
-    await expect(fetchClusterSchema(store, 'c-1', 'nothing')).resolves.toBeNull();
   });
 });
 

@@ -8,6 +8,8 @@ import { product, pages } from './product';
 import Home from './pages/Home.vue';
 import ClusterDashboard from './pages/ClusterDashboard.vue';
 import { toggleViewBar, viewBarLocked, viewBarVisible } from './composables/useViewBarVisibility';
+import { forgetClusterStores } from './composables/useClusterStore';
+import { pagedStores } from './templating/table-paging';
 
 /** What a header action runs with as `this`: the header, with the store and the shell API on it. */
 interface HeaderContext {
@@ -42,6 +44,14 @@ export default function(plugin: IPlugin): void {
   plugin.metadata = require('./package.json');
 
   plugin.addProduct(product, pages);
+
+  // A widget's table is paged wherever the type's own list is (see table-paging).
+  plugin.enableServerSidePagination(pagedStores);
+
+  // The stores it reads other clusters through (see useClusterStore) are closed at a log out. Built into
+  // Rancher, the package is told of one; installed, it is unloaded at one first, as when it is uninstalled.
+  plugin.addNavHooks({ onLogout: forgetClusterStores });
+  plugin.addUninstallHook((_: IPlugin, { store }: { store: VuexStore }) => forgetClusterStores(store));
 
   // The two pages this package makes configurable, each replacing the stock one in place.
   //

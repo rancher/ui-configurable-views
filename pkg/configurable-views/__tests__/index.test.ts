@@ -1,4 +1,6 @@
 import { NotificationLevel } from '@shell/types/notifications';
+import { forgetClusterStores } from '@pkg/configurable-views/composables/useClusterStore';
+import { pagedStores } from '@pkg/configurable-views/templating/table-paging';
 
 jest.mock('@rancher/auto-import', () => ({ importTypes: jest.fn() }), { virtual: true });
 // The pages are only handed to the router here, so stand-ins do.
@@ -12,6 +14,10 @@ jest.mock('@pkg/configurable-views/templating/template-engine', () => ({
   ...jest.requireActual('@pkg/configurable-views/templating/template-engine'),
   toggleTemplating: (...args: unknown[]) => mockToggle(...args),
 }));
+// The stores of other clusters are closed by their own module; here it only answers.
+const mockForget = jest.fn();
+
+jest.mock('@pkg/configurable-views/composables/useClusterStore', () => ({ forgetClusterStores: (...args: unknown[]) => mockForget(...args) }));
 
 describe('extension: configurable-views', () => {
   async function initialize() {
@@ -20,6 +26,7 @@ describe('extension: configurable-views', () => {
       addProduct:                 jest.fn(),
       addRoute:                   jest.fn(),
       addNavHooks:                jest.fn(),
+      addUninstallHook:           jest.fn(),
       addAction:                  jest.fn(),
       setHomePage:                jest.fn(),
       enableServerSidePagination: jest.fn(),
@@ -47,13 +54,28 @@ describe('extension: configurable-views', () => {
     });
   });
 
-  it('adds its product, reads nothing on the way in - its pages do - and registers no paging of its own', async() => {
+  it('adds its product, and reads nothing on the way in - its pages do', async() => {
     const plugin = await initialize();
 
     expect(plugin.addProduct).toHaveBeenCalledTimes(1);
     expect(plugin.addProduct).toHaveBeenCalledWith({ name: 'the product' }, ['the pages']);
-    expect(plugin.addNavHooks).not.toHaveBeenCalled();
-    expect(plugin.enableServerSidePagination).not.toHaveBeenCalled();
+    // Only a log out: the stores it reads other clusters through are closed with the shell's own.
+    expect(plugin.addNavHooks.mock.calls).toStrictEqual([[{ onLogout: forgetClusterStores }]]);
+  });
+
+  it('closes the stores it reads other clusters through when it is unloaded, as an installed extension is at a log out', async() => {
+    const plugin = await initialize();
+    const store = { the: 'store' };
+
+    plugin.addUninstallHook.mock.calls[0][0](plugin, { store });
+
+    expect(mockForget).toHaveBeenCalledWith(store);
+  });
+
+  it("has the server page a widget's table wherever the type's own list is paged", async() => {
+    const plugin = await initialize();
+
+    expect(plugin.enableServerSidePagination).toHaveBeenCalledWith(pagedStores);
   });
 
   it('offers a header button, with a shortcut, on each configurable page that shows and hides the view bar', async() => {

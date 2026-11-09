@@ -1,7 +1,8 @@
-import { ref, watch, type Ref } from 'vue';
+import { ref, useId, watch, type Ref } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { fetchClusterPage, type SteveSort } from '../templating/widget-data';
+import { readChange } from './useClusterChanges';
 import type { ResourceRow } from '../templating/types';
 
 export interface ClusterPageQuery {
@@ -11,11 +12,6 @@ export interface ClusterPageQuery {
   perPage: number;
   /** A fixed order, as Steve fields. */
   sort?: SteveSort[];
-  /**
-   * Read up to a capped number of rows at once rather than a page, for a table that pages, sorts and
-   * filters them itself.
-   */
-  whole?: boolean;
 }
 
 /**
@@ -33,13 +29,13 @@ export function useClusterPage(query: () => ClusterPageQuery) {
   const count = ref(0);
   const loading = ref(false);
   const error = ref('');
-  /** The filter could not be applied to all of the cluster's rows - only to the first `cap` of them. */
-  const truncated = ref(false);
-  /** The rows are one page the server cut, as opposed to everything, paged in the browser. */
-  const serverPaged = ref(false);
   const page = ref(1);
   let lastKey = '';
   let lastPageSize = 0;
+  /** The type's revision the rows were read at. */
+  let revision: string | undefined;
+  // This list's reads after a change, apart from every other's (see readChange).
+  const reader = useId();
 
   async function load(pagination?: { page?: number; perPage?: number }): Promise<void> {
     const q = query();
@@ -53,7 +49,7 @@ export function useClusterPage(query: () => ClusterPageQuery) {
 
     const pageNo = pagination?.page || page.value;
     const pageSize = pagination?.perPage || q.perPage;
-    const key = JSON.stringify([q.resource, q.cluster, q.sort || [], !!q.whole, pageNo, pageSize]);
+    const key = JSON.stringify([q.resource, q.cluster, q.sort || [], pageNo, pageSize]);
 
     if (key === lastKey) {
       return;
@@ -61,6 +57,7 @@ export function useClusterPage(query: () => ClusterPageQuery) {
 
     lastKey = key;
     lastPageSize = pageSize;
+    revision = undefined;
     page.value = pageNo;
     loading.value = true;
     error.value = '';
@@ -72,13 +69,11 @@ export function useClusterPage(query: () => ClusterPageQuery) {
         page:     pageNo,
         pageSize,
         sort:     q.sort,
-        whole:    q.whole,
       });
 
       rows.value = res.rows;
       count.value = res.count;
-      truncated.value = res.truncated;
-      serverPaged.value = res.serverPaged;
+      revision = res.revision;
     } catch (e) {
       rows.value = [];
       count.value = 0;
@@ -90,10 +85,11 @@ export function useClusterPage(query: () => ClusterPageQuery) {
   }
 
   /**
-   * Ask the same question again, because the answer has changed. In place: nothing shows as loading, and
-   * a read that fails leaves the rows as they are.
+   * Ask the same question again, because the answer has changed - at `changedAt`, the revision it changed
+   * at, when that is known. In place: nothing shows as loading, and a read that fails leaves the rows as
+   * they are.
    */
-  async function refresh(): Promise<void> {
+  async function refresh(changedAt?: string): Promise<void> {
     const q = query();
     const asked = lastKey;
 
@@ -102,20 +98,24 @@ export function useClusterPage(query: () => ClusterPageQuery) {
     }
 
     try {
-      const res = await fetchClusterPage(store, {
-        resource: q.resource,
-        cluster:  q.cluster,
-        page:     page.value,
-        pageSize: lastPageSize,
-        sort:     q.sort,
-        whole:    q.whole,
+      const res = await readChange({
+        id:       `configurable-views/${ q.cluster }/${ q.resource }/${ reader }`,
+        revision: changedAt,
+        last:     revision,
+        read:     (at) => fetchClusterPage(store, {
+          resource: q.resource,
+          cluster:  q.cluster,
+          page:     page.value,
+          pageSize: lastPageSize,
+          sort:     q.sort,
+          revision: at,
+        }),
       });
 
-      if (asked === lastKey) {
+      if (res && asked === lastKey) {
         rows.value = res.rows;
         count.value = res.count;
-        truncated.value = res.truncated;
-        serverPaged.value = res.serverPaged;
+        revision = res.revision;
       }
     } catch (e) {}
   }
@@ -127,6 +127,6 @@ export function useClusterPage(query: () => ClusterPageQuery) {
   }, { immediate: true });
 
   return {
-    rows, count, loading, error, truncated, serverPaged, load, refresh
+    rows, count, loading, error, load, refresh
   };
 }
