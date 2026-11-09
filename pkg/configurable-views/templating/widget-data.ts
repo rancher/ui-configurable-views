@@ -178,8 +178,8 @@ function once<T>(store: VuexStore, key: string, load: () => Promise<T>): Promise
   return promise;
 }
 
-/** A cluster's counts: `{ <type>: { summary: { count, states }, namespaces } }`, as Steve returns them. */
-export type ClusterCounts = Record<string, { summary?: { count?: number; states?: Record<string, number> }; namespaces?: Record<string, unknown> }>;
+/** A cluster's counts: `{ <type>: { summary: { count, states }, namespaces: { <name>: { count, states } } } }`, as Steve returns them. */
+export type ClusterCounts = Record<string, { summary?: { count?: number; states?: Record<string, number> }; namespaces?: Record<string, { count?: number; states?: Record<string, number> }> }>;
 
 export function fetchClusterCounts(store: VuexStore, cluster: string): Promise<ClusterCounts> {
   return once(store, `counts|${ cluster }`, async() => {

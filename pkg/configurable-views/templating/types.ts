@@ -1,3 +1,4 @@
+import type { StatusCardsConfig } from './status-cards';
 import type { RancherKubeMetadata } from '@shell/types/rancher/steve.api';
 
 /**
@@ -24,6 +25,8 @@ export type WidgetKind =
   | 'clusterAlerts'
   | 'clusterMetrics'
   | 'clusterExtensionCards'
+  | 'statusCards'
+  | 'generated'
   | 'tabs';
 
 /** Which of the cluster dashboard's Grafana dashboards a metrics widget shows. */
@@ -73,6 +76,10 @@ export interface WidgetSpec {
   metrics?: MetricsDashboard;
   /** A Tabs widget's tabs, each with widgets of its own. */
   tabs?: WidgetTab[];
+  /** A status widget's cards: what is counted, how it is split into cards and rows, and coloured. */
+  status?: StatusCardsConfig;
+  /** A widget Liz wrote: the name of the ConfigMap holding its code (see generatedWidgets). */
+  component?: string;
 }
 
 /**

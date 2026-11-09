@@ -23,11 +23,18 @@ import {
   NODE_WIDGET, type LayoutView, type View, type Sides, type StockView, type PageViews, type WidgetKind,
   type WidgetNode, type WidgetPlace, type WidgetSpec, type WidgetTab, type MetricsDashboard
 } from './types';
+import { normalizeStatusCards } from './status-cards';
 
 export { NODE_WIDGET };
 
 /** The widget that shows rows of a type. */
 const TABLE_KIND = 'table';
+
+/** The widget that counts a cluster's resources into status cards. */
+const STATUS_KIND = 'statusCards';
+
+/** A widget Liz wrote the code of. */
+const GENERATED_KIND = 'generated';
 
 /** The widget that holds other widgets, in tabs. */
 const TABS_KIND = 'tabs';
@@ -303,6 +310,12 @@ export function normalizeWidget(widget: unknown): WidgetSpec {
   }
   if (out.kind === TABS_KIND) {
     out.tabs = normalizeTabs(w.tabs);
+  }
+  if (out.kind === STATUS_KIND) {
+    out.status = normalizeStatusCards(w.status);
+  }
+  if (out.kind === GENERATED_KIND) {
+    out.component = str(w.component);
   }
 
   return out;
