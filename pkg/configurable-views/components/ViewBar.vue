@@ -8,6 +8,7 @@ import { isMac, shortcutLabel } from '@shell/utils/platform';
 import { RcButton } from '@components/RcButton';
 import { RcDropdown, RcDropdownItem, RcDropdownSeparator, RcDropdownTrigger } from '@components/RcDropdown';
 import { useDragReorder } from '../composables/useDragReorder';
+import { viewBarScroll } from '../composables/viewBarScroll';
 import { isStockView } from '../templating/view-model';
 import type { View } from '../templating/types';
 
@@ -98,7 +99,6 @@ const root = ref<HTMLElement | null>(null);
 const tabStrip = ref<HTMLElement | null>(null);
 
 // The editable name while editing - inside the tab loop, so a list; at most one is rendered.
-const nameInput = ref<HTMLInputElement[]>([]);
 
 /** Function refs, as there is a set per tab */
 const tabWraps = new Map<string, HTMLElement>();
@@ -471,9 +471,32 @@ function onName(ev: Event): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onShortcut);
+
+  // A bar drawn again - the page moved between Rancher's own page and a view of widgets - picks up
+  // where the last one was scrolled to, and keeps the open view's tab in sight
+  nextTick(() => {
+    const strip = tabStrip.value;
+    const active = activeView.value && tabButton(activeView.value);
+
+    if (!strip) {
+      return;
+    }
+
+    strip.scrollLeft = viewBarScroll.left;
+
+    if (active) {
+      const tab = active.getBoundingClientRect();
+      const box = strip.getBoundingClientRect();
+
+      if (tab.left < box.left || tab.right > box.right) {
+        active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+    }
+  });
 });
 
 onBeforeUnmount(() => {
+  viewBarScroll.left = tabStrip.value?.scrollLeft || 0;
   window.removeEventListener('keydown', onShortcut);
   clearTimeout(flashTimer);
   cancelAnimationFrame(flashFrame);
@@ -490,9 +513,10 @@ defineExpose({ openRename, focusTab });
     class="vbar"
     :class="{ 'vbar--editing': editing }"
   >
-    <!-- The views. While editing, the one being edited is renamed in place and the rest go quiet:
-       you cannot switch away mid-edit without deciding what to do with your changes. -->
+    <!-- The views, to switch between. While editing they make way for the view being edited (see
+       vbar__title): you cannot switch away mid-edit without deciding what to do with your changes. -->
     <div
+      v-if="!editing"
       ref="tabStrip"
       class="vbar__views"
     >
@@ -516,21 +540,13 @@ defineExpose({ openRename, focusTab });
             held: heldTabKey === view.id,
             flash: flashTabId === view.id,
             'vbar__slot--active': !editing && view.id === activeId,
-            'vbar__slot--field': (editing && view.id === activeId) || renamingId === view.id,
+            'vbar__slot--field': renamingId === view.id,
           }"
           :data-testid="`configurable-views-tab-${ view.id }`"
           @mousedown="startTabDrag(view, $event)"
         >
           <input
-            v-if="editing && view.id === activeId"
-            ref="nameInput"
-            class="vbar__name"
-            :value="view.name"
-            :aria-label="t('configurableViews.bar.viewName')"
-            @input="onName"
-          >
-          <input
-            v-else-if="renamingId === view.id"
+            v-if="renamingId === view.id"
             :ref="(el) => keepRef(renameInputs, view.id, el as HTMLInputElement | null)"
             v-model="renameDraft"
             type="text"
@@ -703,6 +719,23 @@ defineExpose({ openRename, focusTab });
       />
     </div>
 
+    <!-- While editing: the view being edited, by its name, renamed where it stands - at the start of the
+       bar, whichever view it is, so there is no strip of tabs to find it in -->
+    <label
+      v-else
+      class="vbar__title"
+    >
+      <i class="icon icon-edit vbar__pencil" />
+      <input
+        class="vbar__title-input"
+        :value="activeView?.name || ''"
+        :placeholder="t('configurableViews.page.untitled')"
+        :aria-label="t('configurableViews.bar.viewName')"
+        data-testid="configurable-views-title"
+        @input="onName"
+      >
+    </label>
+
     <rc-button
       v-if="!editing"
       variant="link"
@@ -715,7 +748,6 @@ defineExpose({ openRename, focusTab });
     </rc-button>
 
     <template v-if="editing">
-      <i class="icon icon-edit vbar__pencil" />
       <span class="vbar__mode">{{ isNew ? t('configurableViews.bar.newView') : t('configurableViews.bar.editing') }}</span>
       <span class="vbar__hint">{{ editingHint }}</span>
 
@@ -1008,6 +1040,49 @@ $tab-height: 30px;
     // 1px more below than above: the font sits a little low in the box, in every browser.
     padding:       0 10px 1px;
     width:         180px;
+  }
+
+  // The view being edited, by name, at the start of the bar: a rename box - bordered, with a pencil -
+  // so it reads as the place to name the view. What it is (New view / Editing) follows it.
+  &__title {
+    align-items:   center;
+    background:    var(--body-bg);
+    border:        1px solid var(--border);
+    border-radius: var(--border-radius);
+    cursor:        text;
+    display:       flex;
+    flex:          0 1 320px;
+    gap:           8px;
+    height:        32px;
+    min-width:     160px;
+    padding:       0 10px;
+
+    &:hover {
+      border-color: var(--input-hover-border, var(--primary));
+    }
+
+    &:focus-within {
+      border-color: var(--primary);
+      box-shadow:   0 0 0 1px var(--primary);
+    }
+
+    .vbar__pencil {
+      color:     var(--muted);
+      font-size: 14px;
+    }
+  }
+
+  &__title-input {
+    background:  transparent;
+    border:      none;
+    color:       var(--body-text);
+    flex:        1 1 auto;
+    font-size:   14px;
+    font-weight: 600;
+    height:      100%;
+    min-width:   0;
+    outline:     none;
+    padding:     0;
   }
 
   &__pencil {

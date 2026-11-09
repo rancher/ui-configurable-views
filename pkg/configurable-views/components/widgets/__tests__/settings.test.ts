@@ -3,6 +3,8 @@ import { RcButton } from '@components/RcButton';
 import BannerSettings from '@pkg/configurable-views/components/widgets/settings/BannerSettings.vue';
 import LinksSettings from '@pkg/configurable-views/components/widgets/settings/LinksSettings.vue';
 import TabsSettings from '@pkg/configurable-views/components/widgets/settings/TabsSettings.vue';
+import StatusCardsSettings from '@pkg/configurable-views/components/widgets/settings/StatusCardsSettings.vue';
+import { DEFAULT_STATUS_CARDS } from '@pkg/configurable-views/templating/status-cards';
 import type { WidgetSpec } from '@pkg/configurable-views/templating/types';
 
 const global = { provide: { store: { getters: { 'i18n/t': (key: string) => key } } } };
@@ -87,6 +89,37 @@ describe('a widget\'s own settings', () => {
 
       expect(added).toHaveLength(3);
       expect(added[2].id).toBeTruthy();
+    });
+  });
+
+  describe('status cards', () => {
+    const status = (changes = {}) => ({ kind: 'statusCards', status: { ...DEFAULT_STATUS_CARDS, ...changes } } as WidgetSpec);
+    const lastStatus = (wrapper: ReturnType<typeof shallowMount>) => (wrapper.emitted('update')?.pop()?.[0] as WidgetSpec).status;
+
+    it('hands back every card setting with the one that changed', async() => {
+      const widget = status();
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget }, global });
+
+      await wrapper.find('[data-testid="configurable-views-status-cards"]').setValue('namespace');
+
+      expect(lastStatus(wrapper)).toStrictEqual({ ...DEFAULT_STATUS_CARDS, cards: 'namespace' });
+      expect(widget.status?.cards).toBe('type');
+    });
+
+    it('reads the types as a list, and the custom colours as one state each, leaving out a colour it does not know', async() => {
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status({ colors: 'custom' }) }, global });
+
+      await wrapper.find('[data-testid="configurable-views-status-resources"]').setValue('pod, apps.deployment,');
+      expect(lastStatus(wrapper)?.resources).toStrictEqual(['pod', 'apps.deployment']);
+
+      await wrapper.find('textarea').setValue('Running=success\npending=purple\nfailed = error');
+      expect(lastStatus(wrapper)?.customColors).toStrictEqual({ running: 'success', failed: 'error' });
+    });
+
+    it('asks for custom colours only when they are custom', () => {
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status() }, global });
+
+      expect(wrapper.find('textarea').exists()).toBe(false);
     });
   });
 });
