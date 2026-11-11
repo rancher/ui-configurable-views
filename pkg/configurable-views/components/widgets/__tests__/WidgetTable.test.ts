@@ -8,7 +8,28 @@ const mockClusterStore = jest.fn();
 const mockPageLikeItsList = jest.fn();
 
 jest.mock('vue-router', () => ({ useRoute: () => ({ params: {} }) }));
-jest.mock('@pkg/configurable-views/composables/useClusterStore', () => ({ clusterStore: (...args: unknown[]) => mockClusterStore(...args) }));
+// The store of the widget's cluster as the widget sees it: its name once made, or why it could not be.
+jest.mock('@pkg/configurable-views/composables/useClusterStore', () => {
+  const { ref } = jest.requireActual('vue');
+
+  return {
+    useClusterStore: (cluster: () => string) => {
+      const name = ref('');
+      const error = ref('');
+      const from = cluster();
+
+      if (from) {
+        mockClusterStore(from).then((made: string) => {
+          name.value = made;
+        }, () => {
+          error.value = 'configurableViews.errors.cluster';
+        });
+      }
+
+      return { name, error };
+    },
+  };
+});
 jest.mock('@pkg/configurable-views/templating/table-paging', () => ({
   PAGINATION_CONTEXT: 'the package context',
   pageLikeItsList:    (...args: unknown[]) => mockPageLikeItsList(...args),
@@ -86,7 +107,7 @@ describe('a table widget', () => {
     const { wrapper, store, rows } = table({ fromCluster: true, cluster: 'c-2' });
 
     expect(wrapper.text()).toBe('loading');
-    expect(mockClusterStore).toHaveBeenCalledWith(store, 'c-2');
+    expect(mockClusterStore).toHaveBeenCalledWith('c-2');
 
     await flushPromises();
 

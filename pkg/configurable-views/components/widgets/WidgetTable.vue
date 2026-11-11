@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, watch } from 'vue';
 import { useStore } from 'vuex';
 import {
   CAPI, CATALOG, INGRESS, LOCAL_CLUSTER, MANAGEMENT
@@ -10,7 +10,7 @@ import WidgetCard from './WidgetCard.vue';
 import { columnsLinkingTo } from '../../templating/widget-data';
 import { PAGINATION_CONTEXT, pageLikeItsList } from '../../templating/table-paging';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { clusterStore } from '../../composables/useClusterStore';
+import { useClusterStore } from '../../composables/useClusterStore';
 import { useSharedTypeList } from '../../composables/useSharedTypeList';
 import type { TableColumn } from '@shell/types/store/type-map';
 import type { WidgetSpec } from '../../templating/types';
@@ -60,33 +60,10 @@ const NEED_OPEN_CLUSTER: string[] = [CATALOG.APP, INGRESS];
 
 const needsOpenCluster = computed(() => NEED_OPEN_CLUSTER.includes(listed.value) && !store.getters['currentCluster']);
 
-// A cluster that is not the open one is read through a store of its own, made the first time a table
+// A cluster that is not the open one is read through a store of its own, made the first time a widget
 // asks for it.
 const ownCluster = computed(() => (downstream.value && !isOpen.value && !needsOpenCluster.value ? cluster.value : ''));
-const ownStore = ref('');
-const ownStoreError = ref('');
-
-watch(ownCluster, async(from) => {
-  ownStore.value = '';
-  ownStoreError.value = '';
-
-  if (!from) {
-    return;
-  }
-
-  try {
-    const name = await clusterStore(store, from);
-
-    // Asked again in the meantime: that answer is the one to keep.
-    if (ownCluster.value === from) {
-      ownStore.value = name;
-    }
-  } catch (e) {
-    if (ownCluster.value === from) {
-      ownStoreError.value = t('configurableViews.errors.cluster', { cluster: from });
-    }
-  }
-}, { immediate: true });
+const { name: ownStore, error: ownStoreError } = useClusterStore(() => ownCluster.value);
 
 /** The store the table reads, '' while there is none to read. */
 const inStore = computed(() => {

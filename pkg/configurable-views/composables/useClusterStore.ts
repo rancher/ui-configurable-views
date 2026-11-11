@@ -1,3 +1,6 @@
+import { ref, watch } from 'vue';
+import { useStore } from 'vuex';
+import { useI18n } from '@shell/composables/useI18n';
 import coreStore from '@shell/plugins/dashboard-store';
 import { SteveFactory, steveStoreInit } from '@shell/plugins/steve';
 import { keyForSubscribe } from '@shell/plugins/steve/resourceWatcher';
@@ -10,9 +13,10 @@ import { clusterUrl } from '../templating/widget-data';
 // The shell's `cluster` store holds one cluster, the open one, and loading another into it would switch
 // the whole app's current cluster under the user. So a table of another cluster reads a store made for
 // that cluster as the shell makes `cluster`, pointed at that cluster's API: the table is the stock one,
-// its toolbar asks the right cluster, and the store's own socket keeps it live. Each is made the first
-// time a table asks for its cluster, and kept for the session, as the shell keeps its own stores; a log
-// out closes them all (see forgetClusterStores).
+// its toolbar asks the right cluster, and the store's own socket keeps it live. The other widgets that
+// read another cluster - its events, certificates and counts - read through the same store. Each is made
+// the first time a widget asks for its cluster, and kept for the session, as the shell keeps its own
+// stores; a log out closes them all (see forgetClusterStores).
 
 const ready = new Map<string, Promise<string>>();
 
@@ -80,6 +84,41 @@ export function clusterStore(store: VuexStore, cluster: string): Promise<string>
   loading.catch(() => ready.delete(name));
 
   return loading;
+}
+
+/**
+ * The store holding `cluster`, for a widget: its name, '' while it is made or when there is no cluster to
+ * read, and why it could not be made.
+ */
+export function useClusterStore(cluster: () => string) {
+  const store = useStore();
+  const { t } = useI18n(store);
+  const name = ref('');
+  const error = ref('');
+
+  watch(cluster, async(from) => {
+    name.value = '';
+    error.value = '';
+
+    if (!from) {
+      return;
+    }
+
+    try {
+      const made = await clusterStore(store, from);
+
+      // Asked again in the meantime: that answer is the one to keep.
+      if (cluster() === from) {
+        name.value = made;
+      }
+    } catch (e) {
+      if (cluster() === from) {
+        error.value = t('configurableViews.errors.cluster', { cluster: from });
+      }
+    }
+  }, { immediate: true });
+
+  return { name, error };
 }
 
 /**

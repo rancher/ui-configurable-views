@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import {
-  computed, provide, ref, useId, watch
-} from 'vue';
+import { computed, provide } from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -16,8 +14,9 @@ import { TYPES } from '@shell/models/secret';
 import { STATES_ENUM } from '@shell/plugins/dashboard-store/resource-class';
 import { PaginationParamFilter } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { readChange, useClusterChanges } from '../../composables/useClusterChanges';
-import { fetchClusterRows, objectRoute } from '../../templating/widget-data';
+import { useClusterStore } from '../../composables/useClusterStore';
+import { useStorePage } from '../../composables/useStorePage';
+import { objectRoute } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
 // CERTIFICATES — a cluster's TLS certificates: the Certificates tab of its dashboard, as the
@@ -28,12 +27,12 @@ import type { WidgetSpec } from '../../templating/types';
 // first, its search, grouping and bulk actions - with nothing around it.
 //
 // That component reads the `cluster` store, which holds only the open cluster. For any other cluster
-// the widget reads the TLS secrets itself, and again when they change, and draws them in the same bare
-// table, with the same columns and banners. It reads EVERY one and pages in the browser, as the
-// dashboard does: the order that matters is by expiry, which comes out of the certificate itself, so no
-// server can sort by it.
-// Its rows are Secret models - where the expiry, domain and state are worked out - loaded from another
-// cluster's API, so the bulk actions are left off rather than pointed at the wrong store.
+// the widget reads the TLS secrets from that cluster's own store (see useClusterStore), which keeps them
+// live, and draws them in the same bare table, with the same columns and banners. It reads EVERY one and
+// pages in the browser, as the dashboard does: the order that matters is by expiry, which comes out of
+// the certificate itself, so no server can sort by it.
+// Its rows are Secret models - where the expiry, domain and state are worked out - and the bulk actions
+// are left off.
 
 interface Cert {
   id: string;
@@ -64,70 +63,26 @@ const allSecretsLink = computed<RouteLocationRaw>(() => ({
   }
 }));
 
-const certs = ref<Cert[]>([]);
-const loading = ref(false);
-const error = ref('');
-const truncated = ref(false);
-
 // The dashboard's own filter: the secret's type, which Steve lists as field 1.
 const TLS = [PaginationParamFilter.createSingleField({
   field: 'metadata.fields.1', value: TYPES.TLS, exact: true, equals: true
 })];
 
-/** The secrets' revision the certificates were read at. */
-let revision: string | undefined;
-// This widget's reads after a change, apart from every other's (see readChange).
-const reader = useId();
+/** How many are read at once: every one, unless there are more, which the list then says. */
+const CAP = 500;
 
-/** A cluster's certificates, as of the revision `at` at least. */
-const readCerts = (id: string, at?: string) => fetchClusterRows<Cert>(store, {
-  resource: SECRET, cluster: id, filters: TLS, revision: at
-});
-
-/** Show what was read, unless the widget has moved to another cluster since. */
-function showCerts(id: string, res?: { rows: Cert[]; truncated: boolean; revision?: string }): void {
-  if (res && cluster.value === id) {
-    certs.value = res.rows;
-    truncated.value = res.truncated;
-    revision = res.revision;
-  }
-}
-
-// The open cluster's certificates are the stock list's to read.
+// The open cluster's certificates are the stock list's to read. Another cluster's are read from its store.
 const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
+const { name: inStore, error: storeError } = useClusterStore(() => readFrom.value);
 
-watch(readFrom, async(id) => {
-  certs.value = [];
-  error.value = '';
-  truncated.value = false;
-  revision = undefined;
+const {
+  rows: certs, count, loading, error: readError
+} = useStorePage<Cert>(() => ({
+  inStore: inStore.value, type: SECRET, page: 1, pageSize: CAP, filters: TLS
+}));
 
-  if (!id) {
-    return;
-  }
-
-  loading.value = true;
-
-  try {
-    showCerts(id, await readCerts(id));
-  } catch (e) {
-    error.value = t('configurableViews.errors.certificates', { cluster: id });
-  } finally {
-    loading.value = false;
-  }
-}, { immediate: true });
-
-// A read that fails leaves the list as it is.
-useClusterChanges(() => ({ cluster: readFrom.value, type: SECRET }), (changedAt) => {
-  const id = readFrom.value;
-
-  readChange({
-    id:       `configurable-views/${ id }/${ SECRET }/${ reader }`,
-    revision: changedAt,
-    last:     revision,
-    read:     (at) => readCerts(id, at),
-  }).then((res) => showCerts(id, res)).catch(() => undefined);
-});
+const truncated = computed(() => count.value > CAP);
+const error = computed(() => storeError.value || (readError.value ? t('configurableViews.errors.certificates', { cluster: readFrom.value }) : ''));
 
 const headers = [
   {
@@ -233,7 +188,10 @@ function linkFor(row: Cert): RouteLocationRaw[] {
           color="error"
           :label="warnings.expired"
         />
+        <!-- The table asks its store for what its toolbar shows, so it waits for the store of the cluster -->
         <ResourceTable
+          v-if="inStore"
+          :override-in-store="inStore"
           :loading="loading"
           :schema="schema"
           :headers="headers"
@@ -266,6 +224,11 @@ function linkFor(row: Cert): RouteLocationRaw[] {
             </td>
           </template>
         </ResourceTable>
+        <p
+          v-else
+          v-clean-html="t('generic.loading', {}, true)"
+          class="wstock__msg"
+        />
         <p
           v-if="truncated"
           class="wstock__note"

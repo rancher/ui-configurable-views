@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref } from 'vue';
+import { computed, provide, ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -13,8 +13,8 @@ import { AGE, MESSAGE, OBJECT, REASON } from '@shell/config/table-headers';
 import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN } from '@shell/config/pagination-table-headers';
 import { headerFromSchemaColString } from '@shell/store/type-map.utils';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { useClusterChanges } from '../../composables/useClusterChanges';
-import { useClusterPage } from '../../composables/useClusterPage';
+import { useClusterStore } from '../../composables/useClusterStore';
+import { useStorePage } from '../../composables/useStorePage';
 import { objectRoute } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -25,10 +25,10 @@ import type { WidgetSpec } from '../../templating/types';
 // Put it in a Tabs widget and it reads exactly like the tab it came from.
 //
 // That component reads the `cluster` store, which holds only the open cluster. For any other cluster
-// the widget reads the events itself, a page at a time, and draws them in the same bare table with
-// the same link and menu, and reads the page again when its events change. Its order is fixed - newest
-// first - since the server can only be asked to sort by the fields it indexes. Object links into THAT
-// cluster: the shell's link formatters route to the open one.
+// the widget reads the events from that cluster's own store (see useClusterStore), a page at a time, and
+// draws them in the same bare table with the same link and menu; the store keeps them live. Its order is
+// fixed - newest first - since the server can only be asked to sort by the fields it indexes. Object
+// links into THAT cluster: the shell's link formatters route to the open one.
 
 // Shared with the dashboard's own table, so the row count someone picks there holds here too.
 const ROWS_COUNT_PREF = 'events-row-count-pref';
@@ -74,18 +74,31 @@ const allEventsLink = computed<RouteLocationRaw>(() => ({
 
 // The open cluster's events are the stock table's to read.
 const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
+const { name: inStore, error: storeError } = useClusterStore(() => readFrom.value);
+const page = ref(1);
 
 const {
-  rows, count, loading, error, load, refresh
-} = useClusterPage(() => ({
-  resource: EVENT,
-  cluster:  readFrom.value,
-  perPage:  perPage.value,
+  rows, count, loading, error: readError
+} = useStorePage(() => ({
+  inStore:  inStore.value,
+  type:     EVENT,
+  page:     page.value,
+  pageSize: perPage.value,
   // The dashboard's own "last seen" field, descending.
   sort:     [{ field: 'metadata.fields.0', asc: false }],
 }));
 
-useClusterChanges(() => ({ cluster: readFrom.value, type: EVENT }), refresh);
+const error = computed(() => storeError.value || (readError.value ? t('configurableViews.errors.resource', { resource: EVENT, cluster: readFrom.value }) : ''));
+
+// A different number of rows starts again at the first page.
+watch(perPage, () => {
+  page.value = 1;
+});
+
+/** The page the table's pager asks for. */
+function load({ page: asked }: { page: number }): void {
+  page.value = asked;
+}
 
 const unsorted = (h: object) => ({ ...h, sort: false });
 
@@ -149,8 +162,16 @@ function linkFor(row: { involvedObject?: Record<string, string> }): RouteLocatio
       {{ cluster ? error : t(NO_CLUSTER) }}
     </p>
 
+    <!-- The table asks its store for what its toolbar shows, so it waits for the store of the cluster -->
+    <p
+      v-else-if="!inStore"
+      v-clean-html="t('generic.loading', {}, true)"
+      class="wstock__msg"
+    />
+
     <ResourceTable
       v-else
+      :override-in-store="inStore"
       :schema="schema"
       :rows="rows"
       :headers="headers"

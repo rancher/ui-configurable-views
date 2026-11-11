@@ -12,7 +12,6 @@ import type { TableColumn } from '@shell/types/store/type-map';
 import { get } from '@shell/utils/object';
 import { valueFor } from '@shell/utils/table-columns';
 import { parseSi, createMemoryValues } from '@shell/utils/units';
-import { PaginationParamFilter } from '@shell/types/store/pagination.types';
 import {
   CATALOG, ENDPOINTS, MANAGEMENT, METRIC, MONITORING, NODE
 } from '@shell/config/types';
@@ -25,12 +24,6 @@ import type { MetricsDashboard, ResourceRow } from './types';
 import type { TypeSchema } from './resource-types';
 
 type Getters = VuexStore['getters'];
-
-/** One way a Steve list can be sorted. */
-export interface SteveSort {
-  field: string;
-  asc: boolean;
-}
 
 
 // ---- what a cluster serves ------------------------------------------------------------------------
@@ -61,73 +54,6 @@ export async function fetchClusterSchemas(store: VuexStore, cluster: string): Pr
   const res = await store.dispatch('management/request', { url: clusterUrl(cluster, 'schemas') });
 
   return Promise.all((res?.data || []).map((raw: TypeSchema) => store.dispatch('management/create', raw)));
-}
-
-export interface ClusterPageArgs {
-  resource: string;
-  cluster: string;
-  page?: number;
-  pageSize?: number;
-  /** A fixed order, as Steve fields. */
-  sort?: SteveSort[];
-  filters?: PaginationParamFilter[];
-  /** Read up to `cap` rows at once instead of a page. */
-  whole?: boolean;
-  cap?: number;
-  /** Read the type as of this revision at least: after a change, the revision it changed at (see readChange). */
-  revision?: string;
-}
-
-export interface ClusterPage {
-  rows: ResourceRow[];
-  count: number;
-  truncated: boolean;
-  /** The type's revision the rows were read at. */
-  revision?: string;
-}
-
-/**
- * One page of a type, read from ONE named cluster.
- *
- * One, because a Kubernetes type lives behind its cluster's own Steve API and several clusters are
- * several APIs: no backend can answer "rows 9 to 16 of the three of them combined". So the widget
- * names a single cluster and gets real pagination — the backend is asked for that page and returns
- * it with the total count.
- *
- * Or `whole`: up to `cap` rows at once, for a list in an order the server cannot sort by (see
- * fetchClusterRows). `truncated` says when the cluster had more, because a total that quietly stops
- * being a total is worse than a visible limit.
- */
-export async function fetchClusterPage(store: VuexStore, {
-  resource, cluster, page = 1, pageSize = 10, sort = [], filters = [], whole = false, cap = 500, revision
-}: ClusterPageArgs): Promise<ClusterPage> {
-  if (!resource || !cluster) {
-    return {
-      rows: [], count: 0, truncated: false
-    };
-  }
-
-  const res = await store.dispatch('management/findPage', {
-    type: resource,
-    opt:  {
-      url:        clusterUrl(cluster, resource),
-      transient:  true,
-      watch:      false,
-      pagination: {
-        page: whole ? 1 : page, pageSize: whole ? cap : pageSize, sort, filters
-      },
-      revision,
-    },
-  });
-
-  const count = res?.pagination?.result?.count ?? res?.data?.length ?? 0;
-
-  return {
-    rows:      res?.data || [],
-    count:     whole ? (res?.data?.length ?? 0) : count,
-    truncated: whole && count > cap,
-    revision:  res?.pagination?.result?.revision,
-  };
 }
 
 // ---- ONE CLUSTER, READ DIRECTLY -------------------------------------------------------------------
@@ -349,26 +275,6 @@ export async function fetchClusterCapacity(store: VuexStore, cluster: string): P
 
   return {
     hasStats, pods, cores, memory, cpuUsed, ramUsed
-  };
-}
-
-/**
- * EVERY row of a type in one cluster, narrowed by `filters`, up to `cap`.
- *
- * For a list whose order the API cannot produce - certificates, sorted by when they expire, which is
- * read out of the certificate itself - the only honest way to sort is to hold them all. The
- * dashboard's own Certificates list does exactly this, and says why. `truncated` says when the cap
- * cut the list short, so the sort is never quietly over a sample.
- */
-export async function fetchClusterRows<T = ResourceRow>(store: VuexStore, {
-  resource, cluster, filters, cap = 500, revision
-}: { resource: string; cluster: string; filters?: PaginationParamFilter[]; cap?: number; revision?: string }): Promise<{ rows: T[]; truncated: boolean; revision?: string }> {
-  const page = await fetchClusterPage(store, {
-    resource, cluster, filters, cap, whole: true, revision
-  });
-
-  return {
-    rows: page.rows as T[], truncated: page.truncated, revision: page.revision
   };
 }
 

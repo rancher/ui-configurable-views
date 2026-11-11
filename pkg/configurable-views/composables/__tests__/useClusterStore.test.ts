@@ -1,6 +1,8 @@
+import { defineComponent, ref } from 'vue';
+import { flushPromises, mount } from '@vue/test-utils';
 import type { VuexStore } from '@shell/types/store/vuex';
 import { EVENT_CONNECTED } from '@shell/utils/socket';
-import { clusterStore, forgetClusterStores } from '@pkg/configurable-views/composables/useClusterStore';
+import { clusterStore, forgetClusterStores, useClusterStore } from '@pkg/configurable-views/composables/useClusterStore';
 
 const mockCoreStore = jest.fn();
 
@@ -34,7 +36,7 @@ describe('a store of its own for a cluster that is not the open one', () => {
 
     mockCoreStore.mockReset().mockImplementation((_module, config) => () => modules.add(config.namespace));
     store = {
-      getters:   {},
+      getters:   { 'i18n/t': (key: string) => key },
       hasModule: (name: string) => modules.has(name),
       dispatch:  jest.fn().mockResolvedValue(undefined),
       commit:    jest.fn(),
@@ -103,5 +105,45 @@ describe('a store of its own for a cluster that is not the open one', () => {
 
     expect((store.dispatch as jest.Mock).mock.calls.filter(([action]) => action === 'cv-c-1/loadSchemas')).toHaveLength(2);
     expect(mockCoreStore).toHaveBeenCalledTimes(1);
+  });
+
+  describe('for a widget', () => {
+    function using(start: string) {
+      const cluster = ref(start);
+      let made: ReturnType<typeof useClusterStore> | undefined;
+
+      mount(defineComponent({
+        setup() {
+          made = useClusterStore(() => cluster.value);
+
+          return () => null;
+        }
+      }), { global: { provide: { store } } });
+
+      return { made: made as ReturnType<typeof useClusterStore>, cluster };
+    }
+
+    it("names the store of the widget's cluster once it is made, and none with no cluster", async() => {
+      const { made, cluster } = using('c-1');
+
+      expect(made.name.value).toBe('');
+      await flushPromises();
+      expect(made.name.value).toBe('cv-c-1');
+
+      cluster.value = '';
+      await flushPromises();
+      expect(made.name.value).toBe('');
+    });
+
+    it('says so when the cluster cannot be read', async() => {
+      (store.dispatch as jest.Mock).mockRejectedValueOnce(new Error('403'));
+
+      const { made } = using('c-2');
+
+      await flushPromises();
+
+      expect(made.name.value).toBe('');
+      expect(made.error.value).toContain('configurableViews.errors.cluster');
+    });
   });
 });
