@@ -5,7 +5,11 @@ import {
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcButton } from '@components/RcButton';
-import { fetchClusterOptions } from '../templating/widget-data';
+import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
+import { MANAGEMENT } from '@shell/config/types';
+import type { LabelSelectPaginateFnOptions, LabelSelectPaginateFnResponse } from '@shell/types/components/labeledSelect';
+import { allClusterOptions, clusterOption, pageOfClusters, type ClusterOption } from '../templating/widget-data';
+import { PAGINATION_CONTEXT, pageLikeItsList } from '../templating/table-paging';
 import { blockLabelKey } from '../templating/widget-catalog';
 import { WIDGETS } from './widgets/registry';
 import type { SettingsAnchor } from '../composables/viewEditor';
@@ -97,28 +101,68 @@ const heading = computed(() => {
 const needsClusters = computed(() => !!definition.value?.source);
 const offersRancher = computed(() => definition.value?.source === 'rancherOrCluster');
 
-const clusters = ref<{ id: string; label: string }[]>([]);
-
-/** The Cluster field's value for "Rancher" - never a cluster's id, which has no colon. */
+/** The Cluster field's values for "Rancher" and for the page's cluster - never a cluster's id, which has no colon. */
 const RANCHER = ':rancher';
+const PAGE = ':page';
 
 const where = computed({
-  get: () => (offersRancher.value && !draft.fromCluster ? RANCHER : draft.cluster),
+  get: () => (offersRancher.value && !draft.fromCluster ? RANCHER : draft.cluster || PAGE),
   set: (value: string) => {
     if (offersRancher.value) {
       draft.fromCluster = value !== RANCHER;
     }
-    draft.cluster = value === RANCHER ? '' : value;
+    draft.cluster = value === RANCHER || value === PAGE ? '' : value;
   },
 });
 
+/** What the field offers above the clusters. */
+const choices = computed<ClusterOption[]>(() => [
+  ...(offersRancher.value ? [{ value: RANCHER, label: t('configurableViews.widgetSettings.rancher') }] : []),
+  { value: PAGE, label: t('configurableViews.widgetSettings.pageCluster') },
+]);
+
+// The clusters come a page at a time from the server where the shell's Home pages them (see
+// pageOfClusters), and all at once where it does not, when the shell has read them all itself.
+pageLikeItsList(store, 'management', MANAGEMENT.CLUSTER);
+
+const paged = !!store.getters['management/paginationEnabled']({ id: MANAGEMENT.CLUSTER, context: PAGINATION_CONTEXT });
+const allClusters = ref<ClusterOption[]>([]);
+const options = computed(() => [...choices.value, ...allClusters.value]);
+
 /**
- * Read the clusters the picker offers, the moment it is shown, and not on every Home load: a picker of
- * clusters needs all of them, but only while somebody is choosing one.
+ * The names of the clusters the field has been given, and of the widget's own. The field holds only the
+ * pages it has read, and shows a cluster it no longer holds - the widget's, further down a long list, or
+ * one picked from a search - by its value alone.
  */
+const names = ref<Record<string, string>>({});
+
+async function pageOf(opts: LabelSelectPaginateFnOptions<ClusterOption>): Promise<LabelSelectPaginateFnResponse<ClusterOption>> {
+  const isChoice = (o: ClusterOption) => choices.value.some((c) => c.value === o.value);
+  const res = await pageOfClusters(store, { ...opts, pageContent: opts.pageContent.filter((o) => !isChoice(o)) });
+
+  res.page.forEach((o) => {
+    names.value[o.value] = o.label;
+  });
+
+  return { ...res, page: [...choices.value, ...res.page] };
+}
+
+const labelOf = (option: ClusterOption | string): string => (typeof option === 'string' ? names.value[option] || option : option.label);
+
+/** Read the clusters the field offers the moment it is shown, and not on every Home load. */
 watch(needsClusters, async(needed) => {
-  if (needed) {
-    clusters.value = await fetchClusterOptions(store).catch(() => []);
+  if (!needed) {
+    return;
+  }
+
+  if (!paged) {
+    allClusters.value = await allClusterOptions(store).catch(() => []);
+  } else if (draft.cluster) {
+    const own = await clusterOption(store, draft.cluster);
+
+    if (own) {
+      names.value[own.value] = own.label;
+    }
   }
 }, { immediate: true });
 
@@ -138,7 +182,7 @@ function measure(): void {
 function onOutside(ev: MouseEvent): void {
   const target = ev.target as HTMLElement | null;
 
-  // The Resource picker draws its list on the page's body, outside this dialog
+  // The Cluster and Resource pickers draw their lists on the page's body, outside this dialog
   if (target?.closest?.('.vs__dropdown-menu')) {
     return;
   }
@@ -207,28 +251,19 @@ onBeforeUnmount(() => {
 
         <template v-if="needsClusters">
           <label class="wsm__label">{{ t('configurableViews.widgetSettings.cluster') }}</label>
-          <select
-            v-model="where"
-            class="wsm__field"
+          <LabeledSelect
+            v-model:value="where"
+            class="wsm__select"
+            :options="options"
+            :paginate="pageOf"
+            :resource-type="MANAGEMENT.CLUSTER"
+            in-store="management"
+            :context="PAGINATION_CONTEXT"
+            :get-option-label="labelOf"
+            option-key="value"
+            :searchable="true"
             data-testid="configurable-views-widget-cluster"
-          >
-            <option
-              v-if="offersRancher"
-              :value="RANCHER"
-            >
-              {{ t('configurableViews.widgetSettings.rancher') }}
-            </option>
-            <option value="">
-              {{ t('configurableViews.widgetSettings.pageCluster') }}
-            </option>
-            <option
-              v-for="cluster in clusters"
-              :key="cluster.id"
-              :value="cluster.id"
-            >
-              {{ cluster.label }}
-            </option>
-          </select>
+          />
           <p class="wsm__hint">
             {{ t(offersRancher ? 'configurableViews.widgetSettings.tableClusterHint' : 'configurableViews.widgetSettings.clusterHint') }}
           </p>
@@ -309,6 +344,11 @@ onBeforeUnmount(() => {
       flex:      0 0 auto;
       font-size: 16px;
     }
+  }
+
+  // The shell's searchable select, across the dialog like the fields around it
+  &__select {
+    width: 100%;
   }
 
   &__close {

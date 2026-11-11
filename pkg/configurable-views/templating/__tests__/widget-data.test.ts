@@ -1,7 +1,9 @@
 import type { VuexStore } from '@shell/types/store/vuex';
+import { PaginationParamFilter, type PaginationArgs } from '@shell/types/store/pagination.types';
+import { paginationFilterClusters } from '@shell/utils/cluster';
 import {
-  columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterSchemas, fetchMetricsBoards, fetchMonitoring,
-  fetchStateSummaries, hasMonitoringApps, objectRoute, summarizeCounts
+  allClusterOptions, clusterOption, columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterSchemas, fetchMetricsBoards,
+  fetchMonitoring, fetchStateSummaries, hasMonitoringApps, objectRoute, pageOfClusters, summarizeCounts
 } from '@pkg/configurable-views/templating/widget-data';
 
 // A store whose management/request answers by the PATH asked for (query aside): a value, or an
@@ -30,6 +32,75 @@ describe('what a cluster serves', () => {
 
     await expect(fetchClusterSchemas(store, 'c-1')).resolves.toStrictEqual([{ id: 'pod', canList: true }]);
     expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/k8s/clusters/c-1/v1/schemas' });
+  });
+});
+
+describe('the clusters a picker offers', () => {
+  const HARVESTER = {
+    id: 'c-h', spec: { displayName: 'Harvester' }, status: { provider: 'harvester' }
+  };
+
+  // A store hiding the local cluster, with Harvester's container workloads off: the shell leaves both
+  // out of its lists. `urlFor` hands back what it was asked, to see the question the request carried.
+  function storeWith(answer: unknown) {
+    const urlFor = jest.fn((_type: string, _id: null, { pagination }: { pagination: PaginationArgs }) => pagination);
+    const dispatch = jest.fn().mockResolvedValue(answer);
+    const store = {
+      dispatch,
+      getters: {
+        'management/urlFor': urlFor,
+        'management/byId':   () => ({ value: 'true' }),
+        'features/get':      () => false,
+      },
+    } as unknown as VuexStore;
+
+    return {
+      store, dispatch, asked: () => urlFor.mock.calls[0][2].pagination
+    };
+  }
+
+  const opts = {
+    page: 2, pageSize: 10, filter: '', pageContent: [{ value: 'c-1', label: 'One' }], resetPage: false
+  };
+
+  it('reads the page asked for on the server, sorted by name, with only the clusters the shell lists, and keeps none', async() => {
+    const { store, dispatch, asked } = storeWith({ data: [{ id: 'c-2', spec: { displayName: 'Two' } }, { id: 'c-3' }], count: 13 });
+
+    await expect(pageOfClusters(store, opts)).resolves.toStrictEqual({
+      page: [{ value: 'c-1', label: 'One' }, { value: 'c-2', label: 'Two' }, { value: 'c-3', label: 'c-3' }], pages: 2, total: 13
+    });
+    expect(asked()).toStrictEqual(expect.objectContaining({
+      page: 2, pageSize: 10, sort: [{ asc: true, field: 'spec.displayName' }], filters: paginationFilterClusters(store)
+    }));
+    expect(dispatch.mock.calls.map(([action]) => action)).toStrictEqual(['management/request']);
+  });
+
+  it('searches the clusters by name', async() => {
+    const { store, asked } = storeWith({ data: [], count: 0 });
+
+    await pageOfClusters(store, { ...opts, filter: 'lon' });
+
+    expect(asked().filters[0]).toStrictEqual(PaginationParamFilter.createSingleField({
+      field: 'spec.displayName', value: 'lon', exact: false
+    }));
+  });
+
+  it('reads one cluster by its id, whether or not the shell lists it', async() => {
+    const { store, asked } = storeWith({ data: [HARVESTER], count: 1 });
+
+    await expect(clusterOption(store, 'c-h')).resolves.toStrictEqual({ value: 'c-h', label: 'Harvester' });
+    expect(asked().filters).toStrictEqual([PaginationParamFilter.createSingleField({
+      field: 'metadata.name', value: 'c-h', exact: true
+    })]);
+  });
+
+  it('offers every cluster, by name, from the store where they are not paged, without those the shell leaves out', async() => {
+    const { store, dispatch } = storeWith([
+      { id: 'c-2', spec: { displayName: 'Two' } }, { id: 'local', isLocal: true }, HARVESTER, { id: 'c-1', spec: { displayName: 'One' } }
+    ]);
+
+    await expect(allClusterOptions(store)).resolves.toStrictEqual([{ value: 'c-1', label: 'One' }, { value: 'c-2', label: 'Two' }]);
+    expect(dispatch).toHaveBeenCalledWith('management/findAll', { type: 'management.cattle.io.cluster' });
   });
 });
 

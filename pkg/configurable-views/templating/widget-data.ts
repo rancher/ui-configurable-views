@@ -12,6 +12,10 @@ import type { TableColumn } from '@shell/types/store/type-map';
 import { get } from '@shell/utils/object';
 import { valueFor } from '@shell/utils/table-columns';
 import { parseSi, createMemoryValues } from '@shell/utils/units';
+import { PaginationParamFilter, type PaginationParam } from '@shell/types/store/pagination.types';
+import type { LabelSelectPaginateFnOptions, LabelSelectPaginateFnResponse } from '@shell/types/components/labeledSelect';
+import { labelSelectPaginationFunction } from '@shell/components/form/labeled-select-utils/labeled-select.utils';
+import { filterHiddenLocalCluster, filterOnlyKubernetesClusters, paginationFilterClusters } from '@shell/utils/cluster';
 import {
   CATALOG, ENDPOINTS, MANAGEMENT, METRIC, MONITORING, NODE
 } from '@shell/config/types';
@@ -28,18 +32,71 @@ type Getters = VuexStore['getters'];
 
 // ---- what a cluster serves ------------------------------------------------------------------------
 
-/**
- * Every cluster the user can see, as picker options, by the name a person would recognise. Read, not
- * loaded: a table on the page may be showing a page of them from the store, and a `findAll` of the type
- * would replace that page, leaving the table with no rows.
- */
-export async function fetchClusterOptions(store: VuexStore): Promise<{ id: string; label: string }[]> {
-  const res = await store.dispatch('management/request', { url: `/v1/${ MANAGEMENT.CLUSTER }?pagesize=100000&exclude=metadata.managedFields` });
-  const clusters: { id: string; spec?: { displayName?: string } }[] = res?.data || [];
+/** A cluster as a picker offers it: its id, by the name a person would recognise. */
+export interface ClusterOption {
+  value: string;
+  label: string;
+}
 
-  return clusters
-    .map((c) => ({ id: c.id, label: c.spec?.displayName || c.id }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+interface ClusterJson {
+  id: string;
+  spec?: { displayName?: string };
+}
+
+const asOption = (c: ClusterJson): ClusterOption => ({ value: c.id, label: c.spec?.displayName || c.id });
+
+/**
+ * A page of clusters, sorted by name, as the shell's select reads one. Read, not loaded: a table on the
+ * page may be showing a page of them from the store, and loading any cluster into it would replace that
+ * page, leaving the table with no rows.
+ */
+function readClusters(store: VuexStore, opts: LabelSelectPaginateFnOptions, filters: PaginationParam[]) {
+  return labelSelectPaginationFunction<ClusterOption | ClusterJson>({
+    opts,
+    filters,
+    type:             MANAGEMENT.CLUSTER,
+    ctx:              { getters: store.getters, dispatch: store.dispatch },
+    sort:             [{ asc: true, field: 'spec.displayName' }],
+    store:            'management',
+    groupByNamespace: false,
+  });
+}
+
+/**
+ * The page of clusters a picker asks for (see LabeledSelect's `paginate`): searched by name, and only
+ * the clusters the shell lists itself, as the API key page's picker offers them.
+ */
+export async function pageOfClusters(store: VuexStore, opts: LabelSelectPaginateFnOptions<ClusterOption>): Promise<LabelSelectPaginateFnResponse<ClusterOption>> {
+  const search = opts.filter ? [PaginationParamFilter.createSingleField({
+    field: 'spec.displayName', value: opts.filter, exact: false
+  })] : [];
+  const res = await readClusters(store, opts, [...search, ...paginationFilterClusters(store)]);
+
+  // The pages read before this one come back with it, as options already
+  return { ...res, page: res.page.map((c) => ('value' in c ? c : asOption(c))) };
+}
+
+/** One cluster as a picker offers it, by its id, whether or not the picker would list it. */
+export async function clusterOption(store: VuexStore, id: string): Promise<ClusterOption | undefined> {
+  const { page } = await readClusters(store, {
+    page: 1, pageSize: 1, filter: '', pageContent: [], resetPage: true
+  }, [PaginationParamFilter.createSingleField({
+    field: 'metadata.name', value: id, exact: true
+  })]);
+
+  return page[0] ? asOption(page[0] as ClusterJson) : undefined;
+}
+
+/**
+ * Every cluster a picker offers, where the shell does not page them (see pageOfClusters). It has read
+ * them all itself then, so they come from the store, and are left out as the API key page leaves them.
+ */
+export async function allClusterOptions(store: VuexStore): Promise<ClusterOption[]> {
+  const all = await store.dispatch('management/findAll', { type: MANAGEMENT.CLUSTER });
+
+  return filterHiddenLocalCluster(filterOnlyKubernetesClusters(all, store), store)
+    .map(asOption)
+    .sort((a: ClusterOption, b: ClusterOption) => a.label.localeCompare(b.label));
 }
 
 export function clusterUrl(cluster: string, path: string): string {

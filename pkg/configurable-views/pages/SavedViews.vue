@@ -8,7 +8,6 @@ import Tabbed from '@shell/components/Tabbed/index.vue';
 import Tab from '@shell/components/Tabbed/Tab.vue';
 import { RcButton } from '@components/RcButton';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
-import { MANAGEMENT } from '@shell/config/types';
 import {
   appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig, type PageKey
 } from '../templating/template-engine';
@@ -48,13 +47,8 @@ const yamlError = ref('');
 const savingYaml = ref(false);
 const yamlStatus = ref('');
 
-interface ClusterSummary {
-  id: string;
-  isReady?: boolean;
-}
-
-// The cluster dashboard belongs to a cluster: the one that is open, else the local one, else the
-// first that is up.
+// The cluster dashboard belongs to a cluster: the one that is open, else the one the shell would open,
+// from the clusters it has read - never all of them, which is what it avoids reading.
 const openCluster = computed<string>(() => {
   const id = store.getters['clusterId'];
 
@@ -62,9 +56,9 @@ const openCluster = computed<string>(() => {
     return id;
   }
 
-  const clusters: ClusterSummary[] = store.getters['management/all'](MANAGEMENT.CLUSTER) || [];
+  const fallback = store.getters['defaultClusterId'];
 
-  return (clusters.find((c) => c.id === 'local' && c.isReady) || clusters.find((c) => c.isReady))?.id || '';
+  return fallback !== BLANK_CLUSTER ? fallback : '';
 });
 
 const pages = computed<PageEntry[]>(() => [
@@ -79,7 +73,6 @@ const pages = computed<PageEntry[]>(() => [
 ]);
 
 onMounted(async() => {
-  store.dispatch('management/findAll', { type: MANAGEMENT.CLUSTER }).catch(() => undefined);
   await fetchTemplatingConfigMaps(store);
   loaded.value = true;
 });
