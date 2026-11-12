@@ -5,7 +5,20 @@ import type { RancherKubeMetadata } from '@shell/types/rancher/steve.api';
  * through a ConfigMap, so changing a field name here changes what already-saved pages mean; when one
  * does change, the old name keeps being read (see migratePageViews).
  *
- *   PAGE (the Home, a cluster's dashboard) → VIEWS (tabs, when there is more than one) → WIDGETS
+ * PageViews                       (one scope's save for a page: org or a person)
+ * └── views: View[]               (the page's tabs)
+ *     ├── StockView               (kind: 'stock' – Rancher's own page, no widgets)
+ *     └── LayoutView              (a page tab)
+ *         └── widgets: WidgetNode[]          (flat list that wraps; no rows)
+ *             └── WidgetNode                 (colSpan, offset, newLine, height, margin, padding)
+ *                 └── widget: WidgetSpec
+ *                     ├── kind: table
+ *                     ├── kind: overview
+ *                     ├── kind: links | banner | cluster* | resourceCards ...
+ *                     └── kind: tabs
+ *                         └── tabs: WidgetTab[]
+ *                             └── WidgetTab  (id, name)
+ *                                 └── widgets: WidgetNode[]   (anything except another tabs)
  */
 
 /** Which building block a widget is. */
