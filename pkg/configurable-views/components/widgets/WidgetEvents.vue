@@ -12,7 +12,7 @@ import { ROWS_PER_PAGE } from '@shell/store/prefs';
 import { AGE, MESSAGE, REASON } from '@shell/config/table-headers';
 import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN, STEVE_EVENT_OBJECT, STEVE_NAME_COL } from '@shell/config/pagination-table-headers';
 import { headerFromSchemaColString } from '@shell/store/type-map.utils';
-import type { PaginationSort } from '@shell/types/store/pagination.types';
+import type { PaginationParamFilter, PaginationSort } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
 import { useClusterStore } from '../../composables/useClusterStore';
 import { useStorePage } from '../../composables/useStorePage';
@@ -80,16 +80,22 @@ const page = ref(1);
 // The fields of the column the table sorts by, as the shell's paged lists ask for them. Nothing is read until
 // the table has said, as it does once it is drawn.
 const sort = ref<PaginationSort[] | null>(null);
+// What the table views query asks for, already as the server's filters.
+const filters = ref<PaginationParamFilter[]>([]);
 
 const {
-  rows, count, loading, error: readError
+  rows, count, loading, error: readError, args
 } = useStorePage(() => ({
   inStore:  sort.value ? inStore.value : '',
   type:     EVENT,
   page:     page.value,
   pageSize: perPage.value,
   sort:     sort.value || [],
+  filters:  filters.value,
 }));
+
+// A result for each read, as the shell's lists give their tables one, with the args the read was made with.
+const result = computed(() => (args.value ? { count: count.value } : null));
 
 const error = computed(() => storeError.value || (readError.value ? t('configurableViews.errors.resource', { resource: EVENT, cluster: readFrom.value }) : ''));
 
@@ -98,10 +104,13 @@ watch(perPage, () => {
   page.value = 1;
 });
 
-/** The page and order the table asks for. */
-function load({ page: asked, sort: fields = [], descending }: { page: number; sort?: string[]; descending?: boolean }): void {
+/** The page, order and query the table asks for. */
+function load({
+  page: asked, sort: fields = [], descending, viewFilters = []
+}: { page: number; sort?: string[]; descending?: boolean; viewFilters?: PaginationParamFilter[] }): void {
   page.value = asked;
   sort.value = fields.map((field) => ({ field, asc: !descending }));
+  filters.value = viewFilters;
 }
 
 const schema = computed(() => store.getters['management/schemaFor'](EVENT));
@@ -181,7 +190,8 @@ function linkFor(row: { involvedObject?: Record<string, string> }): RouteLocatio
       :headers="headers"
       :loading="loading || !sort"
       :external-pagination-enabled="true"
-      :external-pagination-result="{ count }"
+      :external-pagination-result="result"
+      :external-pagination-args="args"
       :table-actions="false"
       :row-actions="false"
       :namespaced="false"

@@ -1,5 +1,5 @@
 import {
-  onBeforeUnmount, ref, useId, watch, type Ref
+  onBeforeUnmount, ref, shallowRef, useId, watch, type Ref
 } from 'vue';
 import { useStore } from 'vuex';
 import PaginationWrapper from '@shell/utils/pagination-wrapper';
@@ -32,6 +32,11 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
   const loading = ref(false);
   /** Why the last read failed, '' when it did not. */
   const error = ref('');
+  /**
+   * What the rows were read with, new for every read, null while there are none: what a paged table is given
+   * with its rows, so its table views know which query the rows answer, and its export reads every page.
+   */
+  const args = shallowRef<PaginationArgs | null>(null);
   // This widget's reads and listening, apart from every other's.
   const reader = useId();
   let wrapper: PaginationWrapper<T> | null = null;
@@ -60,13 +65,13 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
     return wrapper;
   }
 
-  function request(q: StorePageQuery, revision?: string) {
-    return wrapperOf(q).request({
-      pagination: new PaginationArgs({
-        page: q.page, pageSize: q.pageSize, sort: q.sort || [], filters: q.filters || []
-      }),
-      revision,
+  async function request(q: StorePageQuery, revision?: string) {
+    const pagination = new PaginationArgs({
+      page: q.page, pageSize: q.pageSize, sort: q.sort || [], filters: q.filters || []
     });
+    const res = await wrapperOf(q).request({ pagination, revision });
+
+    return { res, pagination };
   }
 
   async function load(): Promise<void> {
@@ -78,6 +83,7 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
     if (!q.inStore || !q.type) {
       rows.value = [];
       count.value = 0;
+      args.value = null;
       loading.value = false;
 
       return;
@@ -86,17 +92,19 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
     loading.value = true;
 
     try {
-      const res = await request(q);
+      const { res, pagination } = await request(q);
 
       // Asked again in the meantime: that answer is the one to keep.
       if (question === asked()) {
         rows.value = res.data as T[];
         count.value = res.pagination?.result?.count ?? res.data.length;
+        args.value = pagination;
       }
     } catch (e) {
       if (question === asked()) {
         rows.value = [];
         count.value = 0;
+        args.value = null;
         error.value = (e as Error)?.message || `${ e }`;
       }
     } finally {
@@ -119,11 +127,12 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
     }
 
     try {
-      const res = await request(q, revision);
+      const { res, pagination } = await request(q, revision);
 
       if (question === asked()) {
         rows.value = res.data as T[];
         count.value = res.pagination?.result?.count ?? res.data.length;
+        args.value = pagination;
       }
     } catch (e) {}
   }
@@ -133,6 +142,6 @@ export function useStorePage<T extends object = ResourceRow>(query: () => StoreP
   onBeforeUnmount(() => wrapper?.onDestroy());
 
   return {
-    rows, count, loading, error
+    rows, count, loading, error, args
   };
 }

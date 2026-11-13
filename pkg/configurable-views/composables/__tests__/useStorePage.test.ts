@@ -77,6 +77,8 @@ describe('a page of a type from one store', () => {
     expect(page.rows.value).toStrictEqual([{ id: 'a' }]);
     expect(page.count.value).toBe(30);
     expect(page.loading.value).toBe(false);
+    // What a paged table is given with the rows: the very args they were read with
+    expect(page.args.value).toBe(mockWrappers[0].request.mock.calls[0][0].pagination);
   });
 
   it('reads the same page again in place when the type changes, at the revision it changed at', async() => {
@@ -91,6 +93,7 @@ describe('a page of a type from one store', () => {
 
     expect(mockWrappers[0].request.mock.calls[1][0].revision).toBe('42');
     expect(page.rows.value.map((r) => (r as { id: string }).id)).toStrictEqual(['a', 'b']);
+    expect(page.args.value).toBe(mockWrappers[0].request.mock.calls[1][0].pagination);
   });
 
   it('leaves the rows as they are when a read after a change fails, and says why a first read failed', async() => {
@@ -110,6 +113,7 @@ describe('a page of a type from one store', () => {
 
     expect(failed.page.rows.value).toStrictEqual([]);
     expect(failed.page.error.value).toBe('503');
+    expect(failed.page.args.value).toBeNull();
   });
 
   it('keeps the answer to the question asked last', async() => {

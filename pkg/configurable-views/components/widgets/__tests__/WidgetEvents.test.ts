@@ -2,6 +2,7 @@ import { flushPromises, shallowMount } from '@vue/test-utils';
 import ResourceTable from '@shell/components/ResourceTable.vue';
 import { MESSAGE, REASON } from '@shell/config/table-headers';
 import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN, STEVE_EVENT_OBJECT, STEVE_NAME_COL } from '@shell/config/pagination-table-headers';
+import { PaginationParamFilter } from '@shell/types/store/pagination.types';
 import WidgetEvents from '@pkg/configurable-views/components/widgets/WidgetEvents.vue';
 import type { StorePageQuery } from '@pkg/configurable-views/composables/useStorePage';
 import type { WidgetSpec } from '@pkg/configurable-views/templating/types';
@@ -9,6 +10,8 @@ import type { WidgetSpec } from '@pkg/configurable-views/templating/types';
 let mockQuery: () => StorePageQuery = () => ({
   inStore: '', type: '', page: 0, pageSize: 0
 });
+// What the last read came back with, set by a test.
+const mockRead = { count: { value: 0 }, args: { value: null as object | null } };
 
 // Another cluster's events: c-2, whose store is the package's own.
 jest.mock('@pkg/configurable-views/composables/useWidgetCluster', () => {
@@ -32,9 +35,11 @@ jest.mock('@pkg/configurable-views/composables/useStorePage', () => {
   return {
     useStorePage: (query: () => StorePageQuery) => {
       mockQuery = query;
+      mockRead.count = ref(0);
+      mockRead.args = ref(null);
 
       return {
-        rows: ref([]), count: ref(0), loading: ref(false), error: ref('')
+        rows: ref([]), count: mockRead.count, loading: ref(false), error: ref(''), args: mockRead.args
       };
     },
   };
@@ -72,13 +77,16 @@ describe('the Events widget of another cluster', () => {
     ]);
   });
 
-  it('reads nothing until the table asks, then the page and order it asks for', async() => {
+  it('reads nothing until the table asks, then the page, order and query it asks for', async() => {
     const { table } = events();
+    const query = PaginationParamFilter.createSingleField({
+      field: 'reason', value: 'BackOff', exact: false
+    });
 
     expect(mockQuery().inStore).toStrictEqual('');
 
     table().vm.$emit('pagination-changed', {
-      page: 2, perPage: 10, sort: ['metadata.fields.0:desc', 'nameSort'], descending: true
+      page: 2, perPage: 10, sort: ['metadata.fields.0:desc', 'nameSort'], descending: true, viewFilters: [query]
     });
     await flushPromises();
 
@@ -88,6 +96,21 @@ describe('the Events widget of another cluster', () => {
       page:     2,
       pageSize: 10,
       sort:     [{ field: 'metadata.fields.0:desc', asc: false }, { field: 'nameSort', asc: false }],
+      filters:  [query],
     });
+  });
+
+  it('gives the table each read\'s result with the args it was read with, so its table views know the query is answered', async() => {
+    const { table } = events();
+    const read = { page: 1, filters: ['the query'] };
+
+    expect(table().props('externalPaginationResult')).toBeNull();
+
+    mockRead.count.value = 21;
+    mockRead.args.value = read;
+    await flushPromises();
+
+    expect(table().props('externalPaginationResult')).toStrictEqual({ count: 21 });
+    expect(table().props('externalPaginationArgs')).toStrictEqual(read);
   });
 });
