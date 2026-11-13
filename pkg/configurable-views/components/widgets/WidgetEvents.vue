@@ -9,9 +9,10 @@ import { RcDropdown, RcDropdownTrigger, RcDropdownItem } from '@components/RcDro
 import { EVENT } from '@shell/config/types';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
 import { ROWS_PER_PAGE } from '@shell/store/prefs';
-import { AGE, MESSAGE, OBJECT, REASON } from '@shell/config/table-headers';
-import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN } from '@shell/config/pagination-table-headers';
+import { AGE, MESSAGE, REASON } from '@shell/config/table-headers';
+import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN, STEVE_EVENT_OBJECT, STEVE_NAME_COL } from '@shell/config/pagination-table-headers';
 import { headerFromSchemaColString } from '@shell/store/type-map.utils';
+import type { PaginationSort } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
 import { useClusterStore } from '../../composables/useClusterStore';
 import { useStorePage } from '../../composables/useStorePage';
@@ -26,9 +27,9 @@ import type { WidgetSpec } from '../../templating/types';
 //
 // That component reads the `cluster` store, which holds only the open cluster. For any other cluster
 // the widget reads the events from that cluster's own store (see useClusterStore), a page at a time, and
-// draws them in the same bare table with the same link and menu; the store keeps them live. Its order is
-// fixed - newest first - since the server can only be asked to sort by the fields it indexes. Object
-// links into THAT cluster: the shell's link formatters route to the open one.
+// draws them in the same bare table with the same columns, link and menu, sorted on the server as the
+// dashboard sorts them; the store keeps them live. Object links into THAT cluster: the shell's link
+// formatters route to the open one.
 
 // Shared with the dashboard's own table, so the row count someone picks there holds here too.
 const ROWS_COUNT_PREF = 'events-row-count-pref';
@@ -76,16 +77,18 @@ const allEventsLink = computed<RouteLocationRaw>(() => ({
 const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
 const { name: inStore, error: storeError } = useClusterStore(() => readFrom.value);
 const page = ref(1);
+// The fields of the column the table sorts by, as the shell's paged lists ask for them. Nothing is read until
+// the table has said, as it does once it is drawn.
+const sort = ref<PaginationSort[] | null>(null);
 
 const {
   rows, count, loading, error: readError
 } = useStorePage(() => ({
-  inStore:  inStore.value,
+  inStore:  sort.value ? inStore.value : '',
   type:     EVENT,
   page:     page.value,
   pageSize: perPage.value,
-  // The dashboard's own "last seen" field, descending.
-  sort:     [{ field: 'metadata.fields.0', asc: false }],
+  sort:     sort.value || [],
 }));
 
 const error = computed(() => storeError.value || (readError.value ? t('configurableViews.errors.resource', { resource: EVENT, cluster: readFrom.value }) : ''));
@@ -95,12 +98,11 @@ watch(perPage, () => {
   page.value = 1;
 });
 
-/** The page the table's pager asks for. */
-function load({ page: asked }: { page: number }): void {
+/** The page and order the table asks for. */
+function load({ page: asked, sort: fields = [], descending }: { page: number; sort?: string[]; descending?: boolean }): void {
   page.value = asked;
+  sort.value = fields.map((field) => ({ field, asc: !descending }));
 }
-
-const unsorted = (h: object) => ({ ...h, sort: false });
 
 const schema = computed(() => store.getters['management/schemaFor'](EVENT));
 
@@ -112,23 +114,25 @@ const schema = computed(() => store.getters['management/schemaFor'](EVENT));
 function countHeader() {
   try {
     // AGE is what it substitutes for an "age" column; Count is not one, so it only fills the slot.
-    return [unsorted(headerFromSchemaColString('Count', schema.value, store.getters, true, AGE))];
+    return [headerFromSchemaColString('Count', schema.value, store.getters, true, AGE)];
   } catch (e) {
     return [];
   }
 }
 
+// The dashboard's EventsTable's own headers for a paged list, without the link formatters of Object and
+// Name, which link into the open cluster: Object is drawn by the slot below, and Name as text.
 const headers = computed(() => [
-  unsorted({
+  {
     ...REASON, canBeVariable: true, width: 130
-  }),
-  unsorted({ ...OBJECT, formatter: undefined }),
-  unsorted(MESSAGE),
-  unsorted({
-    name: 'name', labelKey: 'tableHeaders.name', value: 'metadata.name'
-  }),
-  unsorted(STEVE_EVENT_FIRST_SEEN),
-  unsorted(STEVE_EVENT_LAST_SEEN),
+  },
+  { ...STEVE_EVENT_OBJECT, formatter: undefined },
+  MESSAGE,
+  {
+    ...STEVE_NAME_COL, defaultSort: false, formatter: undefined
+  },
+  STEVE_EVENT_FIRST_SEEN,
+  STEVE_EVENT_LAST_SEEN,
   ...countHeader(),
 ]);
 
@@ -175,7 +179,7 @@ function linkFor(row: { involvedObject?: Record<string, string> }): RouteLocatio
       :schema="schema"
       :rows="rows"
       :headers="headers"
-      :loading="loading"
+      :loading="loading || !sort"
       :external-pagination-enabled="true"
       :external-pagination-result="{ count }"
       :table-actions="false"
