@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue';
+import { computed, provide, ref } from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -12,10 +12,9 @@ import { ROWS_PER_PAGE } from '@shell/store/prefs';
 import { AGE, MESSAGE, REASON } from '@shell/config/table-headers';
 import { STEVE_EVENT_FIRST_SEEN, STEVE_EVENT_LAST_SEEN, STEVE_EVENT_OBJECT, STEVE_NAME_COL } from '@shell/config/pagination-table-headers';
 import { headerFromSchemaColString } from '@shell/store/type-map.utils';
-import type { PaginationParamFilter, PaginationSort } from '@shell/types/store/pagination.types';
 import { useWidgetCluster, useOpenCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
 import { useClusterStore } from '../../composables/useClusterStore';
-import { useStorePage } from '../../composables/useStorePage';
+import { useTablePage } from '../../composables/useTablePage';
 import { objectRoute } from '../../templating/widget-data';
 import type { WidgetSpec } from '../../templating/types';
 
@@ -54,6 +53,7 @@ function storedRowCount(): number {
 }
 
 const rowCount = ref(storedRowCount());
+// A different number starts again at the first page (see useTablePage).
 const perPage = computed(() => props.widget.limit || rowCount.value);
 
 // The dashboard's own choices for the row-count menu.
@@ -76,42 +76,15 @@ const allEventsLink = computed<RouteLocationRaw>(() => ({
 // The open cluster's events are the stock table's to read.
 const readFrom = computed(() => (isOpen.value ? '' : cluster.value));
 const { name: inStore, error: storeError } = useClusterStore(() => readFrom.value);
-const page = ref(1);
-// The fields of the column the table sorts by, as the shell's paged lists ask for them. Nothing is read until
-// the table has said, as it does once it is drawn.
-const sort = ref<PaginationSort[] | null>(null);
-// What the table views query asks for, already as the server's filters.
-const filters = ref<PaginationParamFilter[]>([]);
 
+// The page the table asks for, sorted and filtered on the server as the dashboard's paged events are.
 const {
-  rows, count, loading, error: readError, args
-} = useStorePage(() => ({
-  inStore:  sort.value ? inStore.value : '',
-  type:     EVENT,
-  page:     page.value,
-  pageSize: perPage.value,
-  sort:     sort.value || [],
-  filters:  filters.value,
+  rows, loading, error: readError, args, asked, result, load
+} = useTablePage(() => ({
+  inStore: inStore.value, type: EVENT, pageSize: perPage.value
 }));
 
-// A result for each read, as the shell's lists give their tables one, with the args the read was made with.
-const result = computed(() => (args.value ? { count: count.value } : null));
-
 const error = computed(() => storeError.value || (readError.value ? t('configurableViews.errors.resource', { resource: EVENT, cluster: readFrom.value }) : ''));
-
-// A different number of rows starts again at the first page.
-watch(perPage, () => {
-  page.value = 1;
-});
-
-/** The page, order and query the table asks for. */
-function load({
-  page: asked, sort: fields = [], descending, viewFilters = []
-}: { page: number; sort?: string[]; descending?: boolean; viewFilters?: PaginationParamFilter[] }): void {
-  page.value = asked;
-  sort.value = fields.map((field) => ({ field, asc: !descending }));
-  filters.value = viewFilters;
-}
 
 const schema = computed(() => store.getters['management/schemaFor'](EVENT));
 
@@ -188,7 +161,7 @@ function linkFor(row: { involvedObject?: Record<string, string> }): RouteLocatio
       :schema="schema"
       :rows="rows"
       :headers="headers"
-      :loading="loading || !sort"
+      :loading="loading || !asked"
       :external-pagination-enabled="true"
       :external-pagination-result="result"
       :external-pagination-args="args"
