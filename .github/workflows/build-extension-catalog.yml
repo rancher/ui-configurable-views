@@ -1,9 +1,27 @@
+# Publish the extension catalog image to ghcr.io.
+#
+# This is the air-gapped path: the same extension bundled into a container image, for clusters
+# that cannot reach GitHub Pages to fetch the Helm repository that build-extension-charts.yml
+# publishes.
+#
+# Pinned by SHA for the same reason as the charts workflow - it is another repository's
+# workflow running with write access to this one's packages. The tag beside the SHA is the
+# shell version it belongs to; bump it together with @rancher/shell in package.json.
+#
+# Unlike the chart, this does not publish on a version bump, because there is no equivalent of
+# the gh-pages index to ask whether a version already exists, and a container tag would be
+# silently overwritten. Publishing a release builds both; after a version bump has published the
+# chart, run this by hand on main. See docs/RELEASING.md.
+#
+# The release tag has to match the ROOT package.json name and version, where the chart matches
+# pkg/configurable-views/package.json. Both are named configurable-views; keep the two versions
+# equal too, or no tag can satisfy both.
 name: Build and Release Extension Catalog
 
 on:
-  workflow_dispatch:
   release:
     types: [released]
+  workflow_dispatch:
 
 defaults:
   run:
@@ -12,7 +30,8 @@ defaults:
 
 jobs:
   build-extension-catalog:
-    uses: rancher/dashboard/.github/workflows/build-extension-catalog.yml@master
+    name: Build and push the catalog image
+    uses: rancher/dashboard/.github/workflows/build-extension-catalog.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
       actions: write
       contents: read
@@ -20,6 +39,8 @@ jobs:
     with:
       registry_target: ghcr.io
       registry_user: ${{ github.actor }}
-      tagged_release: ${{ github.ref_name }}
-    secrets: 
+      # Empty on a manual run, which builds whatever version package.json names. Passing a
+      # branch name here instead would fail the tag check and cancel the run.
+      tagged_release: ${{ github.event_name == 'release' && github.ref_name || '' }}
+    secrets:
       registry_token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,10 @@
+# Verifies the extension still builds, on every pull request.
+#
+# Pinned by SHA like the release workflows: it is another repository's workflow, and a build
+# check that silently changes under you is worth as little as one that does not run. The tag
+# beside the SHA is the shell version it belongs to.
 name: Test extensions build
 
-#
 on:
   pull_request:
 
@@ -11,7 +15,7 @@ defaults:
 
 jobs:
   build-extension-charts:
-    uses: rancher/dashboard/.github/workflows/build-extensions-test.yml@master
+    uses: rancher/dashboard/.github/workflows/build-extensions-test.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     # with this input you can disable this test for any given extension
     # if an exceptional case occurs. Example:
     # with:
