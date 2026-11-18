@@ -1,0 +1,189 @@
+# Keeps @rancher/shell on its newest release, release candidates included.
+#
+# Once a day this asks npm for the newest @rancher/shell in the major line package.json already
+# uses - stable or rc, whichever is newer; see scripts/bump-shell.mjs for why not the next major -
+# and when it is ahead of yarn.lock opens a pull request that bumps package.json and regenerates
+# yarn.lock. Both start from rancher/dashboard's at the shell's release tag - its yarn.lock and its
+# resolutions - so the shell's dependencies install here as dashboard ships them.
+#
+# There is only ever one such pull request open. Each lives on its own bump-shell/<version>
+# branch, and when a newer release replaces it the older one is closed, pointing at the new one,
+# and its branch deleted. If main already has the newest release, any that are left are closed.
+# An open one is left alone while it still merges cleanly, and rebuilt on main when it does not.
+# One closed by hand without merging is not reopened; the next release opens a new one.
+#
+# Dependabot is told to ignore @rancher/shell (see dependabot.yml) so the two never race.
+#
+# Tokens. The default GITHUB_TOKEN is enough to open and close the pull requests, but it cannot
+# push a change to a workflow file, so it cannot move the rancher/dashboard workflow pins along
+# with the shell. When they need moving the pull request says so, to be done by hand. A
+# SHELL_BUMP_TOKEN secret - a fine-grained token or GitHub App token with contents, pull-requests
+# and workflows write on this repository - lets the workflow move them itself.
+name: Bump @rancher/shell
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-shell
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./
+
+jobs:
+  bump-shell:
+    name: Bump @rancher/shell
+    if: github.repository_owner == 'rancher' || vars.ENABLE_BUMP_SHELL == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HAS_BUMP_TOKEN: ${{ secrets.SHELL_BUMP_TOKEN != '' }}
+      BASE: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          # Nothing below runs git with the token until the push, so it is not left in .git/config
+          # for the dependency install to find.
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Find the newest @rancher/shell
+        id: check
+        env:
+          # Read-only use, for the creators-pkg tags.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--write)
+          if [[ "$HAS_BUMP_TOKEN" == 'true' ]]; then
+            flags+=(--pin-workflows)
+          fi
+          node scripts/bump-shell.mjs "${flags[@]}"
+
+      - name: Regenerate yarn.lock
+        if: steps.check.outputs.changed == 'true'
+        env:
+          TARGET: ${{ steps.check.outputs.target }}
+        run: |
+          # .yarnrc sets --frozen-lockfile, which is right for every other install but would refuse
+          # the lockfile change that is the point of this one. --no-default-rc sets it aside.
+          # Scripts are skipped: nothing is built here, and the new package should not run code
+          # in a job that can push.
+          # bump-shell.mjs started yarn.lock from rancher/dashboard's: this drops the entries nothing
+          # here uses and resolves the few dashboard does not have.
+          yarn install --no-default-rc --ignore-scripts --non-interactive
+
+          # And the result has to install as CI installs it.
+          yarn install --frozen-lockfile --ignore-scripts --non-interactive
+
+          locked=$(node scripts/bump-shell.mjs | sed -n 's/^current=//p')
+          if [[ "$locked" != "$TARGET" ]]; then
+            echo "::error::yarn.lock resolved @rancher/shell to ${locked}, expected ${TARGET}"
+            exit 1
+          fi
+
+      - name: Open or refresh the pull request, close the ones it replaces
+        env:
+          GH_TOKEN: ${{ secrets.SHELL_BUMP_TOKEN || github.token }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          TARGET: ${{ steps.check.outputs.target }}
+          CHANGED: ${{ steps.check.outputs.changed }}
+          RELEASED: ${{ steps.check.outputs.released }}
+          PIN_TAG: ${{ steps.check.outputs.pin-tag }}
+          PIN_SHA: ${{ steps.check.outputs.pin-sha }}
+          STALE_PINS: ${{ steps.check.outputs.stale-pins }}
+          PINS_EDITED: ${{ steps.check.outputs.pins-edited }}
+        run: |
+          prefix='bump-shell/'
+          branch="${prefix}${TARGET}"
+
+          # Only branches in this repository: a pull request from a fork that happens to use the same
+          # branch name is somebody else's.
+          open_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE" --state open --limit 100 \
+            --json number,headRefName,mergeable,isCrossRepository \
+            --jq "[.[] | select((.headRefName | startswith(\"${prefix}\")) and (.isCrossRepository | not))]")
+
+          number=''
+          if [[ "$CHANGED" == 'true' ]]; then
+            # Somebody closed the pull request for this very version without merging it: that is a
+            # decision, not something to reopen every morning. The next release starts over.
+            declined=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state closed \
+              --json number,mergedAt,isCrossRepository \
+              --jq '[.[] | select(.mergedAt == null and (.isCrossRepository | not))][0].number // empty')
+            if [[ -n "$declined" ]] && ! jq -e --arg b "$branch" 'any(.headRefName == $b)' <<< "$open_prs" > /dev/null; then
+              echo "#${declined} for @rancher/shell ${TARGET} was closed without merging - not reopening it"
+              exit 0
+            fi
+
+            existing=$(jq -r --arg b "$branch" '.[] | select(.headRefName == $b) | "\(.number) \(.mergeable)"' <<< "$open_prs")
+            read -r number mergeable <<< "$existing"
+
+            if [[ -n "$number" && "$mergeable" != 'CONFLICTING' ]]; then
+              echo "#${number} already bumps @rancher/shell to ${TARGET} and still merges - leaving it"
+            else
+              title="Bump @rancher/shell from ${CURRENT} to ${TARGET}"
+
+              git config user.name 'github-actions[bot]'
+              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git checkout -b "$branch"
+              git add package.json yarn.lock .github/workflows
+              git commit -m "$title"
+              git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${branch}"
+
+              if [[ -n "$number" ]]; then
+                echo "#${number} no longer merged cleanly - rebuilt it on ${BASE}"
+              else
+                compare="https://github.com/rancher/dashboard/compare/shell-pkg-v${CURRENT}...shell-pkg-v${TARGET}"
+                {
+                  echo "Bumps \`@rancher/shell\` from \`${CURRENT}\` to \`${TARGET}\`${RELEASED:+, released ${RELEASED}}, and regenerates \`yarn.lock\`."
+                  echo
+                  echo "\`yarn.lock\` and the \`resolutions\` in \`package.json\` start from rancher/dashboard's at [\`shell-pkg-v${TARGET}\`](https://github.com/rancher/dashboard/tree/shell-pkg-v${TARGET}), so the shell's dependencies install here at the versions dashboard ships it with."
+                  echo
+                  echo "Changes in the shell: ${compare}"
+                  echo
+                  if [[ "$PINS_EDITED" == 'true' ]]; then
+                    echo "The rancher/dashboard workflow pins move to \`${PIN_TAG}\` (\`${PIN_SHA}\`): ${STALE_PINS}."
+                    echo
+                  elif [[ -n "$STALE_PINS" ]]; then
+                    echo "**To do by hand:** the rancher/dashboard workflow pins should move to \`${PIN_TAG}\` (\`${PIN_SHA}\`) in ${STALE_PINS}. This workflow cannot push a workflow-file change without a \`SHELL_BUMP_TOKEN\` secret."
+                    echo
+                  fi
+                  echo "Opened by the [Bump @rancher/shell](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/bump-shell.yml) workflow. It is closed automatically when a newer release replaces it."
+                } > "$RUNNER_TEMP/body.md"
+
+                url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "$branch" \
+                  --title "$title" --body-file "$RUNNER_TEMP/body.md")
+                number="${url##*/}"
+                gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --add-label dependencies,automated || \
+                  echo "::warning::could not label #${number}"
+                echo "Opened #${number}: ${url}"
+              fi
+            fi
+          else
+            echo "${BASE} already has @rancher/shell ${CURRENT}, the newest release"
+          fi
+
+          # Everything else this workflow opened is out of date now.
+          for stale in $(jq -r --arg b "$branch" --arg c "$CHANGED" \
+              '.[] | select($c != "true" or .headRefName != $b) | .number' <<< "$open_prs"); do
+            if [[ -n "$number" ]]; then
+              reason="Superseded by #${number}, which bumps @rancher/shell to ${TARGET}."
+            else
+              reason="${BASE} already has @rancher/shell ${CURRENT}, the newest release."
+            fi
+            gh pr close "$stale" --repo "$GITHUB_REPOSITORY" --comment "$reason" --delete-branch
+            echo "Closed #${stale}: ${reason}"
+          done

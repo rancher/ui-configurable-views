@@ -1,9 +1,42 @@
+# Publish Configurable Views as a Rancher extension, to this repository's gh-pages branch.
+#
+# What Rancher consumes is a Helm repository: an index.yaml at the root of the branch, the
+# chart archives under assets/, and the built extension under extensions/. Somebody installing
+# it adds this repository's Pages URL under Extensions -> Manage Repositories, and the extension
+# appears in Extensions like any other.
+#
+# The build is rancher/dashboard's own reusable workflow, pinned by SHA rather than tracked at
+# @master: it is another repository's workflow running with write access to this one's
+# branches. The tag beside the SHA is the shell version it belongs to; bump it together with
+# @rancher/shell in package.json.
+#
+# Two things have to be true before the first run, and neither is something this workflow can
+# arrange - see docs/RELEASING.md:
+#
+#   - the gh-pages branch has to exist. The publish script checks for it and stops rather than
+#     creating it.
+#   - GitHub Pages has to be serving that branch, since Rancher fetches the index without any
+#     credential from the person installing it.
 name: Build and Release Extension Charts
 
 on:
-  workflow_dispatch:
-  release:  
+  # Tag the commit `configurable-views-<version>` and publish the release. The tag has to match
+  # the package name and version or the build stops, which is what keeps the chart version and
+  # package.json from drifting apart. Publishing a release also builds the catalog image - see
+  # build-extension-catalog.yml.
+  release:
     types: [released]
+  # By hand, for the first run and for re-publishing a version that built wrong.
+  workflow_dispatch:
+  # And on the version changing on main, so that bumping the number is the whole of
+  # publishing. Running on every commit is not an option: a chart version is meant to be
+  # immutable, and republishing the same number with different contents inside it is exactly
+  # the drift the tagged path exists to prevent. So the trigger is the file carrying the
+  # number, and the job below refuses anyway if that number is already published.
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/configurable-views/package.json'
 
 defaults:
   run:
@@ -11,11 +44,79 @@ defaults:
     working-directory: ./
 
 jobs:
+  # Is this version already published? The path filter fires on any edit to package.json, not
+  # only the version, so without this a change to the catalog annotations would republish the
+  # version already on gh-pages under the same number.
+  #
+  # The index on gh-pages is the authority rather than the tags, because it is what Rancher
+  # actually reads: a version missing from it is unpublished no matter what was tagged.
+  version-check:
+    name: Is this version already published
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - id: decide
+        run: |
+          version=$(node -p "require('./pkg/configurable-views/package.json').version")
+          git fetch --depth=1 origin gh-pages 2>/dev/null || true
+
+          if git show origin/gh-pages:index.yaml > /tmp/index.yaml 2>/dev/null; then
+            if grep -qE "^[[:space:]]+version: ${version}$" /tmp/index.yaml; then
+              echo "configurable-views ${version} is already on gh-pages - nothing to publish"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "configurable-views ${version} is not published yet"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
   build-extension-charts:
-    uses: rancher/dashboard/.github/workflows/build-extension-charts.yml@master
+    name: Build and publish the chart
+    needs: version-check
+    # A release and a manual run say what they want outright; only the push trigger is
+    # guessing, and it is the one that has to be talked out of republishing.
+    if: github.event_name != 'push' || needs.version-check.outputs.publish == 'true'
+    uses: rancher/dashboard/.github/workflows/build-extension-charts.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
       contents: write
       pull-requests: write
     with:
       target_branch: gh-pages
-      tagged_release: ${{ github.ref_name }}
+      # Empty on anything but a release, which builds whatever version package.json names.
+      # Passing a branch name here instead would fail the tag check and cancel the run.
+      tagged_release: ${{ github.event_name == 'release' && github.ref_name || '' }}
+
+  # Did anything actually get built?
+  #
+  # The publish script does not fail when the build under it does: it can publish a plugin
+  # directory containing package.json and no JavaScript and still go green. Rancher then
+  # installs that happily - the chart is well formed, the UIPlugin reaches Ready - and the
+  # extension does nothing at all, because there is nothing to load. For this extension that
+  # would look like the stock Home page and cluster dashboard showing, with no views bar.
+  #
+  # So this asks the only question that matters afterwards, of the branch rather than of the
+  # build: is there a bundle on gh-pages for this version.
+  verify-published:
+    name: A bundle exists for this version
+    needs: build-extension-charts
+    if: always() && needs.build-extension-charts.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - run: |
+          version=$(node -p "require('./pkg/configurable-views/package.json').version")
+          git fetch --depth=1 origin gh-pages
+          files=$(git ls-tree -r --name-only origin/gh-pages "extensions/configurable-views/${version}/plugin" || true)
+          echo "$files"
+
+          if ! echo "$files" | grep -qE '\.js$'; then
+            echo "::error::published ${version} has no JavaScript - the build failed and the publish swallowed it"
+            exit 1
+          fi
+
+          echo "ok: $(echo "$files" | grep -cE '\.js$') javascript files published"
