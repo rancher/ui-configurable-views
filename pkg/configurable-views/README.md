@@ -7,7 +7,7 @@ Configurable Views lets you arrange the Home page and each cluster's dashboard f
 
 The views bar stays hidden until you open it from the header button or with **Shift+V**. You can switch Configurable Views off for yourself at any time, and Rancher's own pages show again.
 
-### Target Use Cases
+### Example Use Cases
 * **Platform Teams**: Put the clusters and resources you watch most on the Home page.
 * **Cluster Operators**: Keep a dashboard view for each job, such as workloads, networking or storage, and switch between them.
 
