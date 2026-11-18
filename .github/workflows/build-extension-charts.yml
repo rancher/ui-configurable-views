@@ -32,8 +32,8 @@ on:
   # chart after publishing the release.
   release:
     types: [released]
-  # By hand, to re-publish a version that built wrong: run it from that version's release tag
-  # (Use workflow from -> Tags) so it builds exactly as the release did. See docs/RELEASING.md.
+  # By hand, only from a release tag (Use workflow from -> Tags), to re-publish a version that
+  # built wrong; a run from a branch stops at the first job. See docs/RELEASING.md.
   workflow_dispatch:
 
 defaults:
@@ -42,19 +42,32 @@ defaults:
     working-directory: ./
 
 jobs:
+  # Publishing only ever starts from a release tag: the release itself, or a manual run started
+  # from one. A run from a branch would build without the tag, so the root index.yaml would not
+  # learn the version, and chart-releaser would create the release itself - which fails where
+  # releases are immutable. Stop it here instead.
+  require-tag:
+    name: Started from a release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the run was started from a release tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Start this from a release tag (Run workflow -> Use workflow from -> Tags), not from ${GITHUB_REF_NAME}. A new version is published by publishing a release."
+          exit 1
+
   build-extension-charts:
     name: Build and publish the chart
+    needs: require-tag
     uses: rancher/dashboard/.github/workflows/build-extension-charts.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
       contents: write
       pull-requests: write
     with:
       target_branch: gh-pages
-      # The release's tag, or the tag a manual run was started from. A tagged build is also what
-      # writes the new version into the root index.yaml. Empty on a manual run from a branch,
-      # which builds whatever version package.json names; passing a branch name here instead
-      # would fail the tag check and cancel the run.
-      tagged_release: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      # Always a release tag here (see require-tag). It has to match the package name and
+      # version, and a tagged build is what writes the new version into the root index.yaml.
+      tagged_release: ${{ github.ref_name }}
 
   # Did anything actually get built?
   #
@@ -69,7 +82,6 @@ jobs:
   verify-published:
     name: A bundle exists for this version
     needs: build-extension-charts
-    if: always() && needs.build-extension-charts.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6

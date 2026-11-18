@@ -27,7 +27,21 @@ defaults:
     working-directory: ./
 
 jobs:
+  # Publishing only ever starts from a release tag: the release itself, or a manual run started
+  # from one. A run from a branch would push an image for whatever version package.json names,
+  # with no release behind it. Stop it here instead.
+  require-tag:
+    name: Started from a release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the run was started from a release tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Start this from a release tag (Run workflow -> Use workflow from -> Tags), not from ${GITHUB_REF_NAME}. A new version is published by publishing a release."
+          exit 1
+
   build-extension-catalog:
+    needs: require-tag
     name: Build and push the catalog image
     uses: rancher/dashboard/.github/workflows/build-extension-catalog.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
@@ -37,9 +51,8 @@ jobs:
     with:
       registry_target: ghcr.io
       registry_user: ${{ github.actor }}
-      # The release's tag, or the tag a manual run was started from. Empty on a manual run
-      # from a branch, which builds whatever version package.json names; passing a branch
-      # name here instead would fail the tag check and cancel the run.
-      tagged_release: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      # Always a release tag here (see require-tag). It has to match the ROOT package.json
+      # name and version.
+      tagged_release: ${{ github.ref_name }}
     secrets:
       registry_token: ${{ secrets.GITHUB_TOKEN }}

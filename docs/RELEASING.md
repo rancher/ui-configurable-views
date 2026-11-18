@@ -32,10 +32,10 @@ These need repository admin and only have to be done once.
    Pull requests from forks also have to be allowed to run workflows, or `build-extensions-test`
    never runs on them.
 
-4. **Check the release and pull request settings.** Release immutability can stay on: nothing is
+4. **Check the release and pull request settings.** Release immutability can be on: nothing is
    attached to a release after it is published. `bump-shell` opens its pull requests with the
-   workflow token, which needs **Allow GitHub Actions to create and approve pull requests**
-   (Settings → Actions → General).
+   workflow token unless a `SHELL_BUMP_TOKEN` secret is set, and the workflow token needs **Allow
+   GitHub Actions to create and approve pull requests** (Settings → Actions → General).
 
 ## Cutting a release
 
@@ -47,13 +47,13 @@ These need repository admin and only have to be done once.
    Merging publishes nothing.
 
 2. **Publish a release on `main` tagged `configurable-views-<version>`.** In **Releases → Draft a
-   new release**, type the tag and choose **Create new tag on publish**, set **Target** to `main`,
-   choose the previous release's tag under **Previous tag**, select **Generate release notes**, then
+   new release**, type the tag under **Choose a tag** and create it, set **Target** to `main`,
+   choose the previous release's tag under **Previous tag**, click **Generate release notes**, then
    **Publish release**. Or:
 
    ```sh
-   gh release create configurable-views-0.2.0 --repo rancher/ui-configurable-views \
-     --target main --generate-notes --notes-start-tag configurable-views-0.1.0-main
+   gh release create configurable-views-<version> --repo rancher/ui-configurable-views \
+     --target main --generate-notes
    ```
 
 3. **The release starts both workflows.** `build-extension-charts` builds the chart, commits it to
@@ -62,30 +62,34 @@ These need repository admin and only have to be done once.
 
 The tag must be exactly `configurable-views-<version>`. The chart workflow checks it against
 `pkg/configurable-views/package.json` and the catalog workflow against the root `package.json`; both
-are named `configurable-views`, so one tag satisfies both while the versions match. A tag that
-matches neither stops the run.
+are named `configurable-views`, so one tag satisfies both while the versions match. If the versions
+drift apart, a tag can match only one of them: that half publishes, and the other run fails or
+cancels itself, which is easy to miss.
 
 Both workflows trigger on `release: [released]`, so a **draft** or a **pre-release** publishes
 nothing.
 
-Releases are immutable once published: the title and notes can still be edited, but the tag can't be
-moved and its name can't be used again, so check the tag and the target before publishing.
+This repository has release immutability on, so a release can't change once published: the title and
+notes can still be edited, but the tag can't be moved and its name can't be used again. Check the
+tag and the target before publishing.
 
 ### The first release in this flow
 
 0.1.0 was published before this flow, and its release is tagged on a `gh-pages` build commit, which
 shares no history with `main`. For the next release, choose **`configurable-views-0.1.0-main`** as
-the previous tag - it marks the `main` commit 0.1.0 was built from - or the generated notes list
-every pull request since the start.
+the previous tag (with `gh`, add `--notes-start-tag configurable-views-0.1.0-main`) - it marks the
+`main` commit 0.1.0 was built from - or the generated notes list every pull request since the start.
+
+That version also can't be rebuilt from its release tag, because a `gh-pages` commit has no
+workflows to run: a fix to it goes out as a new version.
 
 ### Re-publishing something that built wrong
 
-The publish script skips a version whose chart is already on `gh-pages`. Delete
-`assets/configurable-views/configurable-views-<version>.tgz` from `gh-pages`, then run **Build and
-Release Extension Charts** by hand from that version's release tag (**Run workflow → Use workflow
-from → Tags**), so it builds exactly as the release did. Run it from the tag, not from `main`: a run
-from a branch builds without the tag and leaves the root `index.yaml` as it was. A manual run of
-**Build and Release Extension Catalog** from the same tag rebuilds the image.
+Run **Build and Release Extension Charts** by hand from that version's release tag (**Run workflow →
+Use workflow from → Tags**). It rebuilds the version and overwrites its chart, its extension files
+and its entry in the root `index.yaml`, and chart-releaser skips the existing release. A run from a
+branch stops before building: publishing always needs a release tag. A manual run of **Build and
+Release Extension Catalog** from the same tag rebuilds the image.
 
 ## Verifying a release
 
