@@ -7,6 +7,7 @@ import { NotificationLevel } from '@shell/types/notifications';
 import { Checkbox } from '@components/Form/Checkbox';
 import { isTemplatingEnabled, toggleTemplating } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
+import GeneratedWidgetsAdmin from '../components/GeneratedWidgetsAdmin.vue';
 
 // Configurable Views settings — each person's own on/off switch for the configurable pages. Always
 // reachable (even when off) so they can be turned back on.
@@ -62,6 +63,8 @@ async function onToggle(value: boolean): Promise<void> {
         {{ t('configurableViews.settings.enabledHint') }}
       </p>
     </div>
+
+    <GeneratedWidgetsAdmin />
   </div>
 </template>
 
