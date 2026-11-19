@@ -20,23 +20,21 @@
 name: Build and Release Extension Charts
 
 on:
-  # Tag the commit `configurable-views-<version>` and publish the release. The tag has to match
-  # the package name and version or the build stops, which is what keeps the chart version and
-  # package.json from drifting apart. Publishing a release also builds the catalog image - see
+  # Publish a release on main tagged `configurable-views-<version>`. The tag has to match the
+  # package name and version or the build stops, which is what keeps the chart version and
+  # package.json from drifting apart. The same release also builds the catalog image - see
   # build-extension-catalog.yml.
+  #
+  # There is deliberately no trigger on merging a version bump. Publishing without a release
+  # left chart-releaser, inside the reusable workflow, to create the release itself: tagged on
+  # the gh-pages build commit rather than on main, the only way a second version reached the
+  # root index.yaml, and refused outright where releases are immutable, because it attaches the
+  # chart after publishing the release.
   release:
     types: [released]
-  # By hand, for the first run and for re-publishing a version that built wrong.
+  # By hand, only from a release tag (Use workflow from -> Tags), to re-publish a version that
+  # built wrong; a run from a branch stops at the first job. See docs/RELEASING.md.
   workflow_dispatch:
-  # And on the version changing on main, so that bumping the number is the whole of
-  # publishing. Running on every commit is not an option: a chart version is meant to be
-  # immutable, and republishing the same number with different contents inside it is exactly
-  # the drift the tagged path exists to prevent. So the trigger is the file carrying the
-  # number, and the job below refuses anyway if that number is already published.
-  push:
-    branches: [main]
-    paths:
-      - 'pkg/configurable-views/package.json'
 
 defaults:
   run:
@@ -44,51 +42,32 @@ defaults:
     working-directory: ./
 
 jobs:
-  # Is this version already published? The path filter fires on any edit to package.json, not
-  # only the version, so without this a change to the catalog annotations would republish the
-  # version already on gh-pages under the same number.
-  #
-  # The index on gh-pages is the authority rather than the tags, because it is what Rancher
-  # actually reads: a version missing from it is unpublished no matter what was tagged.
-  version-check:
-    name: Is this version already published
+  # Publishing only ever starts from a release tag: the release itself, or a manual run started
+  # from one. A run from a branch would build without the tag, so the root index.yaml would not
+  # learn the version, and chart-releaser would create the release itself - which fails where
+  # releases are immutable. Stop it here instead.
+  require-tag:
+    name: Started from a release tag
     runs-on: ubuntu-latest
-    outputs:
-      publish: ${{ steps.decide.outputs.publish }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-
-      - id: decide
+      - name: Check the run was started from a release tag
+        if: github.ref_type != 'tag'
         run: |
-          version=$(node -p "require('./pkg/configurable-views/package.json').version")
-          git fetch --depth=1 origin gh-pages 2>/dev/null || true
-
-          if git show origin/gh-pages:index.yaml > /tmp/index.yaml 2>/dev/null; then
-            if grep -qE "^[[:space:]]+version: ${version}$" /tmp/index.yaml; then
-              echo "configurable-views ${version} is already on gh-pages - nothing to publish"
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
-          echo "configurable-views ${version} is not published yet"
-          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "::error::Start this from a release tag (Run workflow -> Use workflow from -> Tags), not from ${GITHUB_REF_NAME}. A new version is published by publishing a release."
+          exit 1
 
   build-extension-charts:
     name: Build and publish the chart
-    needs: version-check
-    # A release and a manual run say what they want outright; only the push trigger is
-    # guessing, and it is the one that has to be talked out of republishing.
-    if: github.event_name != 'push' || needs.version-check.outputs.publish == 'true'
+    needs: require-tag
     uses: rancher/dashboard/.github/workflows/build-extension-charts.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
       contents: write
       pull-requests: write
     with:
       target_branch: gh-pages
-      # Empty on anything but a release, which builds whatever version package.json names.
-      # Passing a branch name here instead would fail the tag check and cancel the run.
-      tagged_release: ${{ github.event_name == 'release' && github.ref_name || '' }}
+      # Always a release tag here (see require-tag). It has to match the package name and
+      # version, and a tagged build is what writes the new version into the root index.yaml.
+      tagged_release: ${{ github.ref_name }}
 
   # Did anything actually get built?
   #
@@ -103,7 +82,6 @@ jobs:
   verify-published:
     name: A bundle exists for this version
     needs: build-extension-charts
-    if: always() && needs.build-extension-charts.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6

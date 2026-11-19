@@ -53,10 +53,10 @@ is marked `prime-only` and `experimental`, and requires Rancher 2.16 or newer.
 ## Automated workflows
 
 - **build-extensions-test** (every pull request) checks the extension still builds.
-- **build-extension-charts** (a version bump on `main`, a release, or by hand) publishes the Helm
+- **build-extension-charts** (a release, or by hand from a release tag) publishes the Helm
   chart to the `gh-pages` branch, then checks a bundle actually landed.
-- **build-extension-catalog** (a release, or by hand) publishes the extension catalog image to
-  `ghcr.io`.
+- **build-extension-catalog** (a release, or by hand from a release tag) publishes the extension
+  catalog image to `ghcr.io`.
 - **bump-shell** (daily) opens a pull request when a newer `@rancher/shell` is out, with
   `yarn.lock` and the `resolutions` taken from rancher/dashboard's at that shell release.
 - **fossa** (every push to `main`) runs the FOSSA license scan.
@@ -64,7 +64,8 @@ is marked `prime-only` and `experimental`, and requires Rancher 2.16 or newer.
 ## Releasing
 
 See [docs/RELEASING.md](docs/RELEASING.md). In short: bump the version in **both** `package.json`
-and `pkg/configurable-views/package.json`, and merging that bump publishes the Helm chart.
+and `pkg/configurable-views/package.json`, merge that, then publish a GitHub release on `main`
+tagged `configurable-views-<version>`, which publishes the Helm chart and the catalog image.
 
 The release workflows call reusable workflows from `rancher/dashboard` pinned by SHA rather than
 tracked at `@master`, since they run with write access to this repository's branches and packages.

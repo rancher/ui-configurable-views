@@ -8,10 +8,8 @@
 # workflow running with write access to this one's packages. The tag beside the SHA is the
 # shell version it belongs to; bump it together with @rancher/shell in package.json.
 #
-# Unlike the chart, this does not publish on a version bump, because there is no equivalent of
-# the gh-pages index to ask whether a version already exists, and a container tag would be
-# silently overwritten. Publishing a release builds both; after a version bump has published the
-# chart, run this by hand on main. See docs/RELEASING.md.
+# Publishing a release builds this and the chart together. A manual run started from a
+# release tag rebuilds that version's image. See docs/RELEASING.md.
 #
 # The release tag has to match the ROOT package.json name and version, where the chart matches
 # pkg/configurable-views/package.json. Both are named configurable-views; keep the two versions
@@ -29,7 +27,21 @@ defaults:
     working-directory: ./
 
 jobs:
+  # Publishing only ever starts from a release tag: the release itself, or a manual run started
+  # from one. A run from a branch would push an image for whatever version package.json names,
+  # with no release behind it. Stop it here instead.
+  require-tag:
+    name: Started from a release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the run was started from a release tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Start this from a release tag (Run workflow -> Use workflow from -> Tags), not from ${GITHUB_REF_NAME}. A new version is published by publishing a release."
+          exit 1
+
   build-extension-catalog:
+    needs: require-tag
     name: Build and push the catalog image
     uses: rancher/dashboard/.github/workflows/build-extension-catalog.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
     permissions:
@@ -39,8 +51,8 @@ jobs:
     with:
       registry_target: ghcr.io
       registry_user: ${{ github.actor }}
-      # Empty on a manual run, which builds whatever version package.json names. Passing a
-      # branch name here instead would fail the tag check and cancel the run.
-      tagged_release: ${{ github.event_name == 'release' && github.ref_name || '' }}
+      # Always a release tag here (see require-tag). It has to match the ROOT package.json
+      # name and version.
+      tagged_release: ${{ github.ref_name }}
     secrets:
       registry_token: ${{ secrets.GITHUB_TOKEN }}
