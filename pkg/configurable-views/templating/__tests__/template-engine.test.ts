@@ -271,70 +271,117 @@ describe('widgets Liz wrote', () => {
     ]);
   });
 
-  it('keeps approvals in templating-config - the hash of the code approved, who approved it and when - and what else it holds as it was', async() => {
-    jest.useFakeTimers({ now: new Date('2026-11-24T10:00:00Z') });
-    const config = configMap('templating-config', { enabled: 'true' });
-    const { store } = storeWith([config]);
+  describe('approvals', () => {
+    const SETTING = 'management.cattle.io.setting';
 
-    (store.getters as Record<string, unknown>)['auth/user'] = { id: 'u-abc', username: 'admin' };
-    await setWidgetApproval(store, 'liz-widget-a', 'h1');
-    jest.useRealTimers();
+    // The approvals setting as the store holds it: a model with a value, whose save may fail
+    function setting(value: unknown, { canUpdate = true, saves = true } = {}) {
+      return {
+        type:  SETTING,
+        value: typeof value === 'string' ? value : JSON.stringify(value),
+        canUpdate,
+        save:  jest.fn(() => (saves ? Promise.resolve() : Promise.reject(new Error('forbidden')))),
+      };
+    }
 
-    const approval = {
-      hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00.000Z'
-    };
+    // A store whose management/byId has the approvals setting (or none), and whose clone and create
+    // hand back models of their own, kept to be read back
+    function storeWithSetting(approvals: ReturnType<typeof setting> | undefined, saves = true) {
+      const { store, created } = storeWith([configMap('templating-config', { approvedWidgets: { 'liz-widget-old': 'h-old' } })]);
+      const getters = store.getters as Record<string, unknown>;
+      const byId = getters['management/byId'] as (type: string, id: string) => unknown;
+      const made: ReturnType<typeof setting>[] = [];
 
-    expect(JSON.parse(config.data.approvedWidgets)).toStrictEqual({ 'liz-widget-a': approval });
-    expect(config.data.enabled).toBe('true');
-    expect(widgetApprovals(store.getters)).toStrictEqual({ 'liz-widget-a': approval });
+      getters['management/byId'] = (type: string, id: string) => (type === SETTING ? (id === 'ui-configurable-views-widget-approvals' ? approvals : undefined) : byId(type, id));
+      getters['auth/user'] = { id: 'u-abc', username: 'admin' };
+      (store as unknown as { dispatch: jest.Mock }).dispatch = jest.fn((action: string, arg: { resource?: { value?: string }; value?: string }) => {
+        const copy = setting(action === 'management/clone' ? arg.resource?.value || '{}' : arg.value || '{}', { saves });
 
-    await setWidgetApproval(store, 'liz-widget-a', null);
+        made.push(copy);
 
-    expect(widgetApprovals(store.getters)).toStrictEqual({});
-  });
+        return Promise.resolve(action === 'management/create' ? { ...copy, ...arg } : copy);
+      });
 
-  it('still counts an approval kept as just the hash, and ignores one with no hash', () => {
-    const { store } = storeWith([configMap('templating-config', {
-      approvedWidgets: {
-        'liz-widget-old': 'h0',
-        'liz-widget-new': {
+      return {
+        store, made, created
+      };
+    }
+
+    it('are read from the approvals setting, and only those with the hash of the code', () => {
+      const { store } = storeWithSetting(setting({
+        'liz-widget-a': {
           hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
         },
-        'liz-widget-bad':   { by: 'admin' },
-        'liz-widget-empty': ''
-      }
-    })]);
+        'liz-widget-bad': { by: 'admin' },
+        'liz-widget-str': 'h2',
+      }));
 
-    expect(widgetApprovals(store.getters)).toStrictEqual({
-      'liz-widget-old': {
-        hash: 'h0', by: '', at: ''
-      },
-      'liz-widget-new': {
-        hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
-      },
-    });
-  });
-
-  describe('who can approve', () => {
-    it('is whoever can change templating-config, once there is one', () => {
-      const config = { ...configMap('templating-config', {}), canUpdate: false };
-      const { store } = storeWith([config]);
-
-      expect(canApproveWidgets(store.getters)).toBe(false);
-      config.canUpdate = true;
-      expect(canApproveWidgets(store.getters)).toBe(true);
+      expect(widgetApprovals(store.getters)).toStrictEqual({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
+        }
+      });
     });
 
-    it('is whoever can create ConfigMaps, before there is one', () => {
-      const { store } = storeWith([]);
-      const getters = store.getters as Record<string, unknown>;
+    it('no longer count when kept in templating-config, where a project member can write them', () => {
+      const { store } = storeWithSetting(undefined);
 
-      getters['management/schemaFor'] = () => ({ collectionMethods: ['GET', 'post'] });
-      expect(canApproveWidgets(store.getters)).toBe(true);
-      getters['management/schemaFor'] = () => ({ collectionMethods: ['GET'] });
-      expect(canApproveWidgets(store.getters)).toBe(false);
-      getters['management/schemaFor'] = () => undefined;
-      expect(canApproveWidgets(store.getters)).toBe(false);
+      expect(widgetApprovals(store.getters)).toStrictEqual({});
+    });
+
+    it('record the hash approved, who approved it and when - written on a copy, so the stored approvals change only once saved', async() => {
+      jest.useFakeTimers({ now: new Date('2026-11-24T10:00:00Z') });
+      const stored = setting({});
+      const { store, made } = storeWithSetting(stored);
+
+      await setWidgetApproval(store, 'liz-widget-a', 'h1');
+      jest.useRealTimers();
+
+      expect(JSON.parse(made[0].value)).toStrictEqual({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00.000Z'
+        }
+      });
+      expect(made[0].save).toHaveBeenCalledTimes(1);
+      expect(stored.value).toBe('{}');
+    });
+
+    it('leave what is stored as it was when the save fails', async() => {
+      const stored = setting({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: ''
+        }
+      });
+      const { store } = storeWithSetting(stored, false);
+
+      await expect(setWidgetApproval(store, 'liz-widget-a', null)).rejects.toThrow('forbidden');
+      expect(widgetApprovals(store.getters)['liz-widget-a']?.hash).toBe('h1');
+    });
+
+    it('create the setting with the first approval', async() => {
+      const { store, made } = storeWithSetting(undefined);
+
+      await setWidgetApproval(store, 'liz-widget-a', 'h1');
+
+      expect(store.dispatch).toHaveBeenCalledWith('management/create', expect.objectContaining({ type: SETTING, metadata: { name: 'ui-configurable-views-widget-approvals' } }));
+      expect(made[0].save).toHaveBeenCalledTimes(1);
+    });
+
+    describe('who can approve', () => {
+      it('is whoever can change the approvals setting, once there is one', () => {
+        expect(canApproveWidgets(storeWithSetting(setting({}, { canUpdate: false })).store.getters)).toBe(false);
+        expect(canApproveWidgets(storeWithSetting(setting({}, { canUpdate: true })).store.getters)).toBe(true);
+      });
+
+      it('is whoever can create settings, before there is one - not whoever can write ConfigMaps', () => {
+        const { store } = storeWithSetting(undefined);
+        const getters = store.getters as Record<string, unknown>;
+
+        getters['management/schemaFor'] = (type: string) => (type === SETTING ? { collectionMethods: ['GET', 'post'] } : { collectionMethods: ['GET'] });
+        expect(canApproveWidgets(store.getters)).toBe(true);
+        getters['management/schemaFor'] = (type: string) => (type === SETTING ? { collectionMethods: ['GET'] } : { collectionMethods: ['GET', 'POST'] });
+        expect(canApproveWidgets(store.getters)).toBe(false);
+      });
     });
   });
 });

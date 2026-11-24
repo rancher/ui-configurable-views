@@ -3,7 +3,7 @@ product:
 configurableViews:
   settings:
     label: Settings
-    intro: This setting is yours alone. Views are edited on each page — the Home and a cluster’s dashboard.
+    intro: This switch is yours alone. Views are edited on each page — the Home and a cluster’s dashboard.
     enabled: Configurable views enabled
     enabledHint: When off, you see Rancher’s own Home and cluster dashboards. This page stays available so you can turn it back on.
   views:
@@ -200,7 +200,7 @@ configurableViews:
       unknownComponent: "Uses components it is not given ({names}) - they will not draw."
       rawTable: Builds its own table - SortableTable is Rancher’s.
       handBar: Draws its own bars - PercentageBar, StatusBar or a gauge are Rancher’s.
-      hardColour: Hard-codes colours - Rancher’s colour variables follow the theme.
+      hardColour: Hard-codes colors - Rancher’s color variables follow the theme.
       muchCss: Has a lot of its own CSS - Rancher’s components should carry the look.
       outsideApi: Reaches outside the api it is given (store, router, network or browser storage).
       imports: Imports something other than vue - it will not run.

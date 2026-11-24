@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import { SCHEMA } from '@shell/config/types';
-import { fetchClusterSchemas } from '../../../templating/widget-data';
+import { clusterGone, fetchClusterSchemas } from '../../../templating/widget-data';
 import type { TypeSchema } from '../../../templating/resource-types';
 
 /**
@@ -10,7 +10,8 @@ import type { TypeSchema } from '../../../templating/resource-types';
  *
  * A widget following the page on the Home has no cluster yet, so it is offered the local cluster's
  * types - the Kubernetes ones are the same everywhere. A type only another cluster has can be typed.
- * A cluster that cannot be read falls back to the same.
+ * A cluster that cannot be read falls back to the same - at once for one removed from Rancher, whose own
+ * API would answer only after a long wait.
  */
 export function useTypeSchemas(cluster: () => string) {
   const store = useStore();
@@ -32,7 +33,7 @@ export function useTypeSchemas(cluster: () => string) {
     loadingTypes.value = true;
 
     try {
-      const schemas = await fetchClusterSchemas(store, id);
+      const schemas = await clusterGone(store, id) ? local() : await fetchClusterSchemas(store, id);
 
       if (mine === asked) {
         typeSchemas.value = schemas;

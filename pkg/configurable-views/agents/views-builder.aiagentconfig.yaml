@@ -101,8 +101,9 @@ spec:
     - "generated"     a widget Liz WROTE (new kinds of widget). Fields: "component": the widget's
                       ConfigMap name, "cluster", "title". Only use ones that exist and are approved:
                       list ConfigMaps labelled templates.rancher.io/type=widget in namespace default
-                      (cluster "local"); approved ones are the keys of data.approvedWidgets (a JSON
-                      string) in the ConfigMap "templating-config" - READ it, never change it.
+                      (cluster "local"); approved ones are the keys of the JSON in the value of the
+                      Rancher setting "ui-configurable-views-widget-approvals" (management.cattle.io.setting,
+                      cluster "local") - READ it, never change it. No setting means none is approved.
     - "tabs"          widgets inside tabs. Fields: "tabs": [{"id":"t1","name":"..","widgets":[NODE,...]}]. No tabs in tabs.
 
     ## GOOD VIEWS

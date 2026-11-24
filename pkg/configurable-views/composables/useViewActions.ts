@@ -214,14 +214,18 @@ export function useViewActions(
     error.value = '';
 
     try {
-      if (isGeneratedView(orgId) && !scopes.value.global?.views.some((p) => p.id === orgId)) {
-        // A view Liz built lives in a ConfigMap of its own: removing it from everyone deletes that
-        await deleteGeneratedView(store, orgId);
-      } else {
-        const org: PageViews = scopes.value.global ? clone(scopes.value.global) : { views: [] };
+      // The organization's own copy goes - and, for a view Liz built, its ConfigMap too: a published copy of
+      // it stands in for it under the same id, so removing only the copy would bring Liz's original back.
+      const global = scopes.value.global;
+
+      if (global?.views.some((p) => p.id === orgId)) {
+        const org: PageViews = clone(global);
 
         org.views = org.views.filter((p) => p.id !== orgId);
         await saveView(store, 'global', org.views.length ? org : null, props.page);
+      }
+      if (isGeneratedView(orgId)) {
+        await deleteGeneratedView(store, orgId);
       }
       await fetchTemplatingConfigMaps(store);
 

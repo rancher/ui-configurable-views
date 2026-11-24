@@ -111,11 +111,13 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
       return;
     }
 
-    // A Tabs widget's first tabs are named in the reader's language - the names are then the view's own.
-    const spec = entry.spec.tabs ? {
-      ...entry.spec,
-      tabs: entry.spec.tabs.map((tab, i) => ({ ...tab, name: t('configurableViews.widgetSettings.newTab', { index: i + 1 }) })),
-    } : entry.spec;
+    // A ready-made widget's title, and a Tabs widget's first tabs, are named in the reader's language -
+    // the names are then the view's own.
+    const titled = entry.titleKey ? { ...entry.spec, title: t(entry.titleKey) } : entry.spec;
+    const spec = titled.tabs ? {
+      ...titled,
+      tabs: titled.tabs.map((tab, i) => ({ ...tab, name: t('configurableViews.widgetSettings.newTab', { index: i + 1 }) })),
+    } : titled;
     const node = newWidgetNode(spec, { colSpan: entry.span });
 
     mutate((list) => (target ? dropWidget(list, node, target, place) : insertWidget(list, node)));

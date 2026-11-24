@@ -94,7 +94,14 @@ function dropStyles(): void {
 // by the code itself, not the widget: the stored widgets are read again whenever any of this package's
 // ConfigMaps changes, each read a new object with the same code, which would compile it - and flash
 // the spinner - every time.
+//
+// Each compile waits twice (the hash, the compiler's chunk): one overtaken by a newer compile, or by the
+// widget going, lands nothing - so an older source never replaces a newer one, nor leaves its styles.
+let compiling = 0;
+
 watch([() => source.value?.source ?? null, approved], async([code, approval]) => {
+  const mine = ++compiling;
+  const current = () => mine === compiling;
   const widget = code === null ? null : source.value;
 
   compiled.value = null;
@@ -114,7 +121,12 @@ watch([() => source.value?.source ?? null, approved], async([code, approval]) =>
 
   state.value = 'loading';
 
-  if (await widgetHash(widget.source) !== approval) {
+  const matches = await widgetHash(widget.source) === approval;
+
+  if (!current()) {
+    return;
+  }
+  if (!matches) {
     state.value = 'changed';
 
     return;
@@ -122,18 +134,28 @@ watch([() => source.value?.source ?? null, approved], async([code, approval]) =>
 
   try {
     const { compileWidget } = await import(/* webpackChunkName: "generated-widget-compiler" */ '../../templating/widget-compiler');
+
+    if (!current()) {
+      return;
+    }
+
     const out: CompiledWidget = compileWidget(widget.source, `${ widget.name }.vue`);
 
     styles = out.styles;
     compiled.value = { ...out.component, components: { ...COMPONENTS, ...(out.component.components as Record<string, Component> || {}) } } as Component;
     state.value = 'ready';
   } catch (e) {
-    error.value = (e as Error)?.message || String(e);
-    state.value = 'failed';
+    if (current()) {
+      error.value = (e as Error)?.message || String(e);
+      state.value = 'failed';
+    }
   }
 }, { immediate: true });
 
-onBeforeUnmount(dropStyles);
+onBeforeUnmount(() => {
+  compiling++;
+  dropStyles();
+});
 
 // A widget that throws while drawing is shown as failed, not taken down with the page
 onErrorCaptured((e) => {
@@ -161,6 +183,9 @@ watch(cluster, async(id) => {
 
 // ---- what the widget is given ----
 
+/** The most resources one `api.list` reads: a widget is a summary, never the whole list. */
+const LIST_MAX = 500;
+
 const clusterUrl = (path: string) => `/k8s/clusters/${ encodeURIComponent(cluster.value) }/v1/${ path }`;
 
 /**
@@ -169,9 +194,14 @@ const clusterUrl = (path: string) => `/k8s/clusters/${ encodeURIComponent(cluste
 const api = computed(() => ({
   cluster: cluster.value,
 
-  /** Every resource of a type (in one namespace, if given): plain objects, as the API returns them. */
+  /**
+   * The resources of a type (in one namespace, if given), as plain objects as the API returns them - at
+   * most `limit` of them (500 unless asked for fewer): one page of Steve's list, whose page size is
+   * `pagesize` (it ignores `limit`).
+   */
   async list(type: string, opts: { namespace?: string; limit?: number } = {}): Promise<Record<string, unknown>[]> {
-    const res = await store.dispatch('management/request', { url: `${ clusterUrl(opts.namespace ? `${ type }/${ opts.namespace }` : type) }?limit=${ opts.limit || 500 }&exclude=metadata.managedFields` });
+    const pageSize = Math.min(Math.max(Math.round(Number(opts.limit) || LIST_MAX), 1), LIST_MAX);
+    const res = await store.dispatch('management/request', { url: `${ clusterUrl(opts.namespace ? `${ type }/${ opts.namespace }` : type) }?pagesize=${ pageSize }&exclude=metadata.managedFields` });
 
     return res?.data || [];
   },
@@ -233,7 +263,7 @@ const message = computed(() => {
     return t('configurableViews.errors.clusterGone', { cluster: cluster.value });
   }
 
-  return state.value === 'ready' || state.value === 'loading' ? '' : t(`configurableViews.generated.${ state.value }`, { name: props.widget.component, error: error.value });
+  return state.value === 'ready' || state.value === 'loading' ? '' : t(`configurableViews.generated.${ state.value }`, { name: source.value?.displayName || props.widget.component, error: error.value });
 });
 </script>
 

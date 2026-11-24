@@ -52,8 +52,11 @@ spec:
         title:   an optional heading the page draws ABOVE your widget - do not draw it yourself
         api:     READ-ONLY access to that cluster (all async unless noted):
           api.list(type, { namespace?, limit? })  -> plain resources as the Kubernetes/Steve API
-                                                    returns them (metadata, spec, status), e.g.
-                                                    api.list('pod'), api.list('apps.deployment', { namespace: 'default' })
+                                                    returns them (metadata, spec, status) - at most
+                                                    `limit` (500 when not given), e.g.
+                                                    api.list('pod', { limit: 200 }), api.list('apps.deployment', { namespace: 'default' })
+                                                    For HOW MANY, use api.counts() / api.states(): they
+                                                    count every resource without reading each one.
           api.get(type, 'name' | 'namespace/name') -> one resource
           api.counts()      -> { '<type>': { summary: { count, states: { error: n, ... } },
                                              namespaces: { '<ns>': { count, states } } } } for EVERY type
@@ -98,8 +101,9 @@ spec:
       Colours are only ever 'success', 'info', 'warning', 'error', 'disabled' (component props) or
       Rancher's CSS variables - never #hex, rgb() or named colours.
     - Load data in mounted(); keep `loading` and `error` in data(); show <Loading> and a <Banner
-      color="error"> for them. Re-load every 30 seconds with setInterval and clearInterval it in
-      beforeUnmount(). Re-load when `cluster` changes (watch it).
+      color="error"> for them. Re-load every 60 seconds with setInterval, skipping a run while the
+      page is hidden (document.hidden), and clearInterval it in beforeUnmount(). Re-load when
+      `cluster` changes (watch it). Read only what you show: a limit on api.list, counts for totals.
     - Custom CSS is for LAYOUT only (flex/grid, gaps, margins), a few lines, using Rancher's variables
       when needed: var(--body-text), var(--muted), var(--border), var(--border-radius). The components
       carry the look; do not restyle them.
@@ -131,13 +135,13 @@ spec:
           };
         },
         watch: { cluster() { this.load(); } },
-        mounted() { this.load(); this.timer = setInterval(this.load, 30000); },
+        mounted() { this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000); },
         beforeUnmount() { clearInterval(this.timer); },
         methods: {
           async load() {
             if (!this.cluster) { this.loading = false; return; }
             try {
-              const pods = await this.api.list('pod');
+              const pods = await this.api.list('pod', { limit: 500 });
               this.rows = pods.map((p) => ({ id: p.id, name: p.metadata.name, namespace: p.metadata.namespace,
                 restarts: (p.status?.containerStatuses || []).reduce((n, c) => n + (c.restartCount || 0), 0) }))
                 .sort((a, b) => b.restarts - a.restarts).slice(0, 20);

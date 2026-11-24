@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, useId } from 'vue';
 import { useStore } from 'vuex';
 import { useRoute } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
@@ -19,6 +19,10 @@ const emit = defineEmits<{ update: [changes: Partial<WidgetSpec>] }>();
 const store = useStore();
 const { t } = useI18n(store);
 const route = useRoute();
+
+// Each label names its control (for screen readers, and a click on it focuses the control)
+const uid = useId();
+const fieldId = (name: string) => `${ uid }-status-${ name }`;
 
 const status = computed<StatusCardsConfig>(() => normalizeStatusCards(props.widget.status));
 
@@ -86,8 +90,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
     {{ t('configurableViews.widgetSettings.status.resourcesHint') }}
   </p>
 
-  <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.namespace') }}</label>
+  <label
+    class="wsm__label"
+    :for="fieldId('namespace')"
+  >{{ t('configurableViews.widgetSettings.status.namespace') }}</label>
   <input
+    :id="fieldId('namespace')"
     v-model.trim="namespace"
     class="wsm__field"
     :placeholder="t('configurableViews.widgetSettings.status.namespacePlaceholder')"
@@ -95,8 +103,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
 
   <div class="status-settings__pair">
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.cards') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('cards')"
+      >{{ t('configurableViews.widgetSettings.status.cards') }}</label>
       <select
+        :id="fieldId('cards')"
         v-model="cards"
         class="wsm__field"
         data-testid="configurable-views-status-cards"
@@ -111,8 +123,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
       </select>
     </div>
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.rows') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('rows')"
+      >{{ t('configurableViews.widgetSettings.status.rows') }}</label>
       <select
+        :id="fieldId('rows')"
         v-model="rows"
         class="wsm__field"
         data-testid="configurable-views-status-rows"
@@ -127,8 +143,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
       </select>
     </div>
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.only') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('only')"
+      >{{ t('configurableViews.widgetSettings.status.only') }}</label>
       <select
+        :id="fieldId('only')"
         v-model="only"
         class="wsm__field"
       >
@@ -142,8 +162,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
       </select>
     </div>
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.sort') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('sort')"
+      >{{ t('configurableViews.widgetSettings.status.sort') }}</label>
       <select
+        :id="fieldId('sort')"
         v-model="sort"
         class="wsm__field"
       >
@@ -157,8 +181,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
       </select>
     </div>
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.top') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('top')"
+      >{{ t('configurableViews.widgetSettings.status.top') }}</label>
       <input
+        :id="fieldId('top')"
         v-model.number="top"
         type="number"
         min="0"
@@ -166,8 +194,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
       >
     </div>
     <div>
-      <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.maxCards') }}</label>
+      <label
+        class="wsm__label"
+        :for="fieldId('maxCards')"
+      >{{ t('configurableViews.widgetSettings.status.maxCards') }}</label>
       <input
+        :id="fieldId('maxCards')"
         v-model.number="maxCards"
         type="number"
         min="0"
@@ -179,8 +211,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
     {{ t('configurableViews.widgetSettings.status.topHint') }}
   </p>
 
-  <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.colors') }}</label>
+  <label
+    class="wsm__label"
+    :for="fieldId('colors')"
+  >{{ t('configurableViews.widgetSettings.status.colors') }}</label>
   <select
+    :id="fieldId('colors')"
     v-model="colors"
     class="wsm__field"
     data-testid="configurable-views-status-colors"
@@ -194,8 +230,12 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
     </option>
   </select>
   <template v-if="colors === 'custom'">
-    <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.customColors') }}</label>
+    <label
+      class="wsm__label"
+      :for="fieldId('customColors')"
+    >{{ t('configurableViews.widgetSettings.status.customColors') }}</label>
     <textarea
+      :id="fieldId('customColors')"
       v-model.lazy="customColorsText"
       class="wsm__field wsm__field--area"
       rows="4"

@@ -288,7 +288,7 @@ const {
 });
 
 const startTabDrag = (view: View, event: MouseEvent) => {
-  if (event.button !== 0 || props.editing || renamingId.value || props.views.findIndex((v) => v.id === view.id) < LOCKED_TAB_COUNT) {
+  if (event.button !== 0 || renamingId.value || props.views.findIndex((v) => v.id === view.id) < LOCKED_TAB_COUNT) {
     return;
   }
 
@@ -540,7 +540,7 @@ defineExpose({ openRename, focusTab });
           :class="{
             held: heldTabKey === view.id,
             flash: flashTabId === view.id,
-            'vbar__slot--active': !editing && view.id === activeId,
+            'vbar__slot--active': view.id === activeId,
             'vbar__slot--field': renamingId === view.id,
           }"
           :data-testid="`configurable-views-tab-${ view.id }`"
@@ -575,7 +575,6 @@ defineExpose({ openRename, focusTab });
               class="vbar__view"
               :aria-selected="view.id === activeId"
               :tabindex="view.id === focusableTabId ? 0 : -1"
-              :disabled="editing"
               @click="$emit('select', view.id)"
               @keydown.left.prevent="stepTab(-1)"
               @keydown.right.prevent="stepTab(1)"
@@ -601,7 +600,6 @@ defineExpose({ openRename, focusTab });
             </rc-button>
 
             <rc-dropdown-trigger
-              v-if="!editing"
               variant="ghost"
               size="small"
               class="vbar__caret"

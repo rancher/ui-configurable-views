@@ -39,6 +39,16 @@ describe('reviewWidget', () => {
     expect(out.findings).toStrictEqual(['unknownComponent', 'outsideApi']);
   });
 
+  it('flags reaching outside the api from the template too, and by the ways round the obvious names', () => {
+    const outside = (template: string, script = 'export default {};') => reviewWidget(sfc(template, script)).findings.includes('outsideApi');
+
+    expect(outside('<button @click="$store.dispatch(\'x\')" />')).toBe(true);
+    expect(outside('<p />', 'export default { mounted() { getCurrentInstance().appContext.config.globalProperties.$store; } };')).toBe(true);
+    expect(outside('<p />', "export default { mounted() { window['fe' + 'tch']('/v1'); } };")).toBe(true);
+    expect(outside('<p />', "export default { mounted() { new Function('return 1')(); } };")).toBe(true);
+    expect(outside('<p>{{ title }}</p>', 'export default { props: [\'api\'], mounted() { if (!document.hidden) { this.api.list(\'pod\'); } } };')).toBe(false);
+  });
+
   it('flags an import other than vue, and a lot of CSS', () => {
     const css = Array.from({ length: 45 }, (_, i) => `.c${ i } { margin: 0; }`).join('\n');
 

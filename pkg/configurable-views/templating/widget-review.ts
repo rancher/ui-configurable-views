@@ -32,6 +32,14 @@ function block(source: string, tag: string): string {
   return open?.index !== undefined && close > open.index ? source.slice(open.index + open[0].length, close) : '';
 }
 
+/** What a widget given only its props and the api has no reason to touch. */
+const OUTSIDE_API = new RegExp([
+  String.raw`\$(store|router|route)\b`, 'getCurrentInstance', 'globalProperties', 'appContext',
+  String.raw`\bfetch\s*\(`, 'XMLHttpRequest', 'WebSocket', 'EventSource', 'localStorage', 'sessionStorage', 'indexedDB',
+  String.raw`document\.cookie`, String.raw`\b(window|globalThis|self)\s*[.[]`, String.raw`\beval\s*\(`,
+  String.raw`\bFunction\s*\(`, String.raw`\bimport\s*\(`,
+].join('|'));
+
 export function reviewWidget(source: string): WidgetReview {
   const template = block(source, 'template');
   const script = block(source, 'script');
@@ -61,7 +69,9 @@ export function reviewWidget(source: string): WidgetReview {
   if (style.split('\n').filter((line) => line.trim()).length > 40) {
     findings.push('muchCss');
   }
-  if (/\bthis\.\$(store|router|route)\b|\bfetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|document\.cookie|window\.location/.test(script)) {
+  // In the template too - a handler can reach the store as well as the script can - and the ways round
+  // the obvious names: the app's own properties, `window[...]`, code built from a string, a dynamic import
+  if (OUTSIDE_API.test(`${ script }\n${ template }`)) {
     findings.push('outsideApi');
   }
   if (/^\s*import\s+(?![^;]*from\s+['"]vue['"])/m.test(script)) {

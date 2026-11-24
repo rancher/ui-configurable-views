@@ -17,10 +17,10 @@
 //
 // Liz writes what she builds into ConfigMaps of their own, beside it: a view each (see generatedViews),
 // and a widget each (see generatedWidgets), whose code runs once an admin approves it. The approvals
-// are kept in `templating-config` (see widgetApprovals).
+// are kept in a Rancher setting, which only admins can write (see APPROVALS_SETTING).
 
 import type { VuexStore } from '@shell/types/store/vuex';
-import { CONFIG_MAP } from '@shell/config/types';
+import { CONFIG_MAP, MANAGEMENT } from '@shell/config/types';
 import { PREF_ENABLED, PREF_VIEWS, definePrefs, savePref } from './user-prefs';
 import { migratePageViews } from './view-model';
 import type { PageViews, View } from './types';
@@ -39,7 +39,6 @@ const TYPE_VIEW = 'view';
 /** A widget Liz wrote the code of - a new kind of widget (see generatedWidgets). */
 const TYPE_WIDGET = 'widget';
 
-const CONFIG_NAME = 'templating-config';
 const HOME_CONFIG_NAME = 'templating-home';
 
 const configLabels = { [LABEL_MARKER]: 'true', [LABEL_TYPE]: TYPE_CONFIG };
@@ -276,39 +275,59 @@ export function generatedWidgets(getters: Getters): GeneratedWidget[] {
 /** An approval of a widget's code: exactly which code (the SHA-256 of its source), who approved it and when. */
 export interface WidgetApproval {
   hash: string;
-  /** The approver's username, or user id. Empty for an approval recorded before this was kept. */
+  /** The approver's username, or user id. */
   by: string;
-  /** When, as an ISO date. Empty for an approval recorded before this was kept. */
+  /** When, as an ISO date. */
   at: string;
+}
+
+/**
+ * WHERE APPROVALS ARE KEPT: a Rancher setting, not a ConfigMap. Every signed-in user can read settings,
+ * so every browser can check a widget's approval; only admins - and anyone given the right to manage
+ * settings - can write them. A ConfigMap beside the widgets would not do: Rancher's default project-member
+ * role can write ConfigMaps in the local cluster's Default project, where `default` is, and approved code
+ * runs in Rancher for everyone who opens a page with it, with that person's access.
+ *
+ * Approvals kept in templating-config before this no longer count, for that reason: those widgets wait
+ * to be approved again.
+ */
+export const APPROVALS_SETTING = 'ui-configurable-views-widget-approvals';
+
+interface SettingModel {
+  value?: string;
+  canUpdate?: boolean;
+  save(): Promise<unknown>;
+}
+
+const approvalsSetting = (getters: Getters): SettingModel | undefined => getters['management/byId']?.(MANAGEMENT.SETTING, APPROVALS_SETTING);
+
+/**
+ * Read the approvals again. The shell loads every setting when Rancher opens, without watching them, so
+ * an approval made since - by another admin - shows once this is read. Never rejects: no setting yet
+ * means nothing is approved.
+ */
+export async function fetchWidgetApprovals(store: VuexStore): Promise<void> {
+  await store.dispatch('management/find', {
+    type: MANAGEMENT.SETTING, id: APPROVALS_SETTING, opt: { force: true }
+  }).catch(() => undefined);
 }
 
 /**
  * Which widgets' code was approved, and exactly which code: widget name -> its approval. A widget runs
  * only while its source still has the approved hash, so any change - by Liz or by hand - needs
- * approving again. Kept in templating-config, as one JSON string.
- *
- * WHO CAN APPROVE is whoever may write ConfigMaps in this namespace - the same people who can write
- * the widgets, and publish views to everyone (templating-home is here too). Approved code runs in
- * Rancher for everyone who opens a page with the widget, with that person's access, so that write
- * access belongs to admins only. A real separation waits for the views' own CRD.
- *
- * An approval recorded as just the hash, before who and when were kept, still counts.
+ * approving again.
  */
 export function widgetApprovals(getters: Getters): Record<string, WidgetApproval> {
-  const parsed = parse(cmNamed(getters, CONFIG_NAME)?.data?.approvedWidgets) as Record<string, unknown>;
+  const parsed = parse(approvalsSetting(getters)?.value) as Record<string, unknown>;
   const out: Record<string, WidgetApproval> = {};
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
 
   for (const [name, value] of Object.entries(parsed)) {
-    if (typeof value === 'string' && value) {
-      out[name] = {
-        hash: value, by: '', at: ''
-      };
-    } else if (value && typeof value === 'object' && text((value as WidgetApproval).hash)) {
-      const v = value as WidgetApproval;
+    const v = (value && typeof value === 'object' ? value : {}) as Partial<WidgetApproval>;
 
+    if (text(v.hash)) {
       out[name] = {
-        hash: v.hash, by: text(v.by), at: text(v.at)
+        hash: text(v.hash), by: text(v.by), at: text(v.at)
       };
     }
   }
@@ -330,40 +349,40 @@ export async function setWidgetApproval(store: VuexStore, name: string, hash: st
     delete approvals[name];
   }
 
-  const existing = cmNamed(store.getters, CONFIG_NAME);
-  const approvedWidgets = JSON.stringify(approvals);
+  const value = JSON.stringify(approvals);
+  const existing = approvalsSetting(store.getters);
 
   if (existing) {
-    existing.data = { ...(existing.data || {}), approvedWidgets };
-    await existing.save();
+    // Changed on a copy: a write that fails leaves the stored approvals - and what the page shows - as
+    // they were, rather than showing an approval that was never saved
+    const copy: SettingModel = await store.dispatch('management/clone', { resource: existing });
+
+    copy.value = value;
+    await copy.save();
 
     return;
   }
 
-  const cm: ConfigMapModel = await store.dispatch('management/create', {
-    type:     CONFIG_MAP,
-    metadata: {
-      name: CONFIG_NAME, namespace: NAMESPACE, labels: configLabels
-    },
-    data: { approvedWidgets },
+  const setting: SettingModel = await store.dispatch('management/create', {
+    type: MANAGEMENT.SETTING, metadata: { name: APPROVALS_SETTING }, value
   });
 
-  await cm.save();
+  await setting.save();
 }
 
 /**
- * Whether the person signed in can approve widgets: change templating-config, where approvals are
- * kept - or, before there is one, create ConfigMaps. The same RBAC the write itself meets, so nobody is
- * offered buttons that can only fail.
+ * Whether the person signed in can approve widgets: change the approvals setting - or, before there is
+ * one, create settings. The same RBAC the write itself meets, so nobody is offered buttons that can only
+ * fail.
  */
 export function canApproveWidgets(getters: Getters): boolean {
-  const config = cmNamed(getters, CONFIG_NAME) as (ConfigMapModel & { canUpdate?: boolean }) | undefined;
+  const setting = approvalsSetting(getters);
 
-  if (config) {
-    return !!config.canUpdate;
+  if (setting) {
+    return !!setting.canUpdate;
   }
 
-  const schema = getters['management/schemaFor']?.(CONFIG_MAP) as { collectionMethods?: string[] } | undefined;
+  const schema = getters['management/schemaFor']?.(MANAGEMENT.SETTING) as { collectionMethods?: string[] } | undefined;
 
   return !!schema?.collectionMethods?.some((method) => method.toUpperCase() === 'POST');
 }

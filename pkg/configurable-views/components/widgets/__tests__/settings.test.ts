@@ -144,6 +144,18 @@ describe('a widget\'s own settings', () => {
       expect(lastStatus(wrapper)?.resources).toStrictEqual(['pod', 'apps.deployment']);
     });
 
+    it('offers the local cluster\'s types at once for a cluster removed from Rancher, without asking that cluster', async() => {
+      const notFound = Object.defineProperty({ code: 'NotFound' }, '_status', { value: 404 });
+      const dispatch = jest.fn((action: string) => (action === 'management/find' ? Promise.reject(notFound) : Promise.resolve({ data: [] })));
+      const store = { getters: withSchemas.provide.store.getters, dispatch };
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: { ...status(), cluster: 'c-m-gone' } as WidgetSpec }, global: { provide: { store } } });
+
+      await flushPromises();
+
+      expect((wrapper.findComponent(LabeledSelect).props('options') as { value: string }[]).map((o) => o.value)).toContain('pod');
+      expect(dispatch.mock.calls.filter(([action]) => action === 'management/request')).toHaveLength(0);
+    });
+
     it('reads the custom colours as one state each, leaving out a colour it does not know', async() => {
       const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status({ colors: 'custom' }) }, global: withSchemas });
 

@@ -23,6 +23,7 @@ jest.mock('@pkg/configurable-views/templating/template-engine', () => {
     setWidgetApproval:         (...args: unknown[]) => mockState.approve(...args),
     deleteGeneratedWidget:     (...args: unknown[]) => mockState.remove(...args),
     fetchTemplatingConfigMaps: () => Promise.resolve(),
+    fetchWidgetApprovals:      () => Promise.resolve(),
   };
 });
 // A hash that says which code it is of
@@ -72,7 +73,10 @@ describe('the widgets Liz wrote, on Settings', () => {
     expect(button(wrapper, 'approve').attributes('disabled')).toBeDefined();
     expect(button(wrapper, 'read-hint').text()).toContain('configurableViews.generatedAdmin.readFirst');
 
+    expect(button(wrapper, 'code').attributes('aria-expanded')).toBe('false');
     await button(wrapper, 'code').trigger('click');
+    expect(button(wrapper, 'code').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find(`#${ button(wrapper, 'code').attributes('aria-controls') }`).text()).toBe('<p>one</p>');
     expect(button(wrapper, 'approve').attributes('disabled')).toBeUndefined();
     expect(button(wrapper, 'read-hint').exists()).toBe(false);
 

@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { useShell } from '@shell/apis';
 import { NotificationLevel } from '@shell/types/notifications';
 import { BadgeState } from '@components/BadgeState';
-import LiveDate from '@shell/components/formatter/LiveDate.vue';
+import { Banner } from '@components/Banner';
+import DateFormatter from '@shell/components/formatter/Date.vue';
 import {
-  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps, canApproveWidgets
+  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps, fetchWidgetApprovals, canApproveWidgets
 } from '../templating/template-engine';
-import { widgetHash } from '../templating/widget-hash';
 import { reviewWidget } from '../templating/widget-review';
 import { useConfirm } from '../composables/useConfirm';
+import { useWidgetHashes } from '../composables/useWidgetHashes';
 
 // The widgets Liz wrote, and the gate in front of them: an admin reads each one's code and approves
 // it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
@@ -26,8 +27,11 @@ const confirm = useConfirm();
 
 const canApprove = computed(() => canApproveWidgets(store.getters));
 
-// Settings opens without them otherwise: the switch above it is a preference.
-onMounted(() => fetchTemplatingConfigMaps(store));
+// The widgets, and the approvals as they are now: Settings opens without the widgets otherwise (the
+// switch above it is a preference), and the shell read the approvals only when Rancher opened.
+const refresh = () => Promise.all([fetchTemplatingConfigMaps(store), fetchWidgetApprovals(store)]);
+
+onMounted(refresh);
 
 const widgets = computed(() => generatedWidgets(store.getters));
 
@@ -37,16 +41,7 @@ const reviews = computed(() => Object.fromEntries(widgets.value.map((w) => [w.na
 const approvals = computed(() => widgetApprovals(store.getters));
 
 // Each widget's code, hashed - what an approval is compared with
-const hashes = ref<Record<string, string>>({});
-
-watch(widgets, async(list) => {
-  const out: Record<string, string> = {};
-
-  for (const w of list) {
-    out[w.name] = await widgetHash(w.source);
-  }
-  hashes.value = out;
-}, { immediate: true });
+const hashes = useWidgetHashes(() => widgets.value);
 
 type Status = 'pending' | 'approved' | 'changed';
 
@@ -95,7 +90,7 @@ async function run(name: string, action: () => Promise<void>, done: string): Pro
 
   try {
     await action();
-    await fetchTemplatingConfigMaps(store);
+    await refresh();
     shell.notification.send(NotificationLevel.Success, t('configurableViews.generatedAdmin.title'), done);
   } catch (e) {
     shell.notification.send(NotificationLevel.Error, t('configurableViews.generatedAdmin.failed'), (e as Error)?.message || String(e));
@@ -104,33 +99,36 @@ async function run(name: string, action: () => Promise<void>, done: string): Pro
   }
 }
 
+/** How a widget is named to people: its display name, as its card is headed - not its ConfigMap's. */
+const labelOf = (name: string) => widgets.value.find((w) => w.name === name)?.displayName || name;
+
 function approve(name: string): Promise<void> | void {
   if (readState(name) !== 'read') {
     return;
   }
 
-  return run(name, () => setWidgetApproval(store, name, readHash.value[name]), t('configurableViews.generatedAdmin.approved', { name }));
+  return run(name, () => setWidgetApproval(store, name, readHash.value[name]), t('configurableViews.generatedAdmin.approved', { name: labelOf(name) }));
 }
 
 async function revoke(name: string): Promise<void> {
   if (await confirm({
-    title:  t('configurableViews.generatedAdmin.revokeConfirm.title', { name }),
-    body:   t('configurableViews.generatedAdmin.revokeConfirm.body', { name }),
+    title:  t('configurableViews.generatedAdmin.revokeConfirm.title', { name: labelOf(name) }),
+    body:   t('configurableViews.generatedAdmin.revokeConfirm.body', { name: labelOf(name) }),
     action: t('configurableViews.generatedAdmin.revoke'),
     danger: true,
   })) {
-    await run(name, () => setWidgetApproval(store, name, null), t('configurableViews.generatedAdmin.revoked', { name }));
+    await run(name, () => setWidgetApproval(store, name, null), t('configurableViews.generatedAdmin.revoked', { name: labelOf(name) }));
   }
 }
 
 async function remove(name: string): Promise<void> {
   if (await confirm({
-    title:  t('configurableViews.generatedAdmin.deleteConfirm.title', { name }),
-    body:   t('configurableViews.generatedAdmin.deleteConfirm.body', { name }),
+    title:  t('configurableViews.generatedAdmin.deleteConfirm.title', { name: labelOf(name) }),
+    body:   t('configurableViews.generatedAdmin.deleteConfirm.body', { name: labelOf(name) }),
     action: t('configurableViews.generatedAdmin.delete'),
     danger: true,
   })) {
-    await run(name, () => deleteGeneratedWidget(store, name), t('configurableViews.generatedAdmin.deleted', { name }));
+    await run(name, () => deleteGeneratedWidget(store, name), t('configurableViews.generatedAdmin.deleted', { name: labelOf(name) }));
   }
 }
 </script>
@@ -177,12 +175,10 @@ async function remove(name: string): Promise<void> {
             :data-testid="`generated-widget-approved-by-${ w.name }`"
           >
             {{ t('configurableViews.generatedAdmin.approvedBy', { by: approvals[w.name].by }) }}
-            <LiveDate
-              v-if="approvals[w.name].at"
-              :value="approvals[w.name].at"
-              :add-suffix="true"
-              :show-tooltip="true"
-            />
+            <template v-if="approvals[w.name].at">
+              ·
+              <DateFormatter :value="approvals[w.name].at" />
+            </template>
           </span>
         </div>
       </div>
@@ -205,23 +201,28 @@ async function remove(name: string): Promise<void> {
           class="text-muted"
         >{{ t('configurableViews.generatedAdmin.usesNone') }}</span>
       </div>
-      <ul
+      <!-- What a reviewer should look at twice, as Rancher shows a warning -->
+      <Banner
         v-if="reviews[w.name].findings.length"
         class="gwa__findings"
+        color="warning"
         :data-testid="`generated-widget-findings-${ w.name }`"
       >
-        <li
-          v-for="f in reviews[w.name].findings"
-          :key="f"
-        >
-          <i class="icon icon-warning" />
-          {{ t(`configurableViews.generatedAdmin.finding.${ f }`, { names: reviews[w.name].unknown.join(', ') }) }}
-        </li>
-      </ul>
+        <ul>
+          <li
+            v-for="f in reviews[w.name].findings"
+            :key="f"
+          >
+            {{ t(`configurableViews.generatedAdmin.finding.${ f }`, { names: reviews[w.name].unknown.join(', ') }) }}
+          </li>
+        </ul>
+      </Banner>
 
       <div class="gwa__actions">
         <button
           class="btn btn-sm role-secondary"
+          :aria-expanded="!!open[w.name]"
+          :aria-controls="`generated-widget-source-${ w.name }`"
           :data-testid="`generated-widget-code-${ w.name }`"
           @click="toggleCode(w.name)"
         >
@@ -264,6 +265,7 @@ async function remove(name: string): Promise<void> {
 
       <pre
         v-if="open[w.name]"
+        :id="`generated-widget-source-${ w.name }`"
         class="gwa__code"
       >{{ w.source }}</pre>
     </div>
@@ -328,13 +330,11 @@ async function remove(name: string): Promise<void> {
   }
 
   &__findings {
-    color:      var(--warning);
-    list-style: none;
-    margin:     10px 0 0;
-    padding:    0;
+    margin: 10px 0 0;
 
-    li {
-      margin: 2px 0;
+    ul {
+      margin:       0;
+      padding-left: 18px;
     }
   }
 

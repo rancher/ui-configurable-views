@@ -14,6 +14,7 @@ import {
   DEFAULT_GAP, DEFAULT_PAGE_PADDING, widthPresetOf, heightPresetOf, spacingPresetOf
 } from '../templating/view-model';
 import { generatedWidgets, widgetApprovals } from '../templating/template-engine';
+import { useWidgetHashes } from '../composables/useWidgetHashes';
 import type { View, WidgetNode } from '../templating/types';
 
 // The "Edit view" drawer. Three tabs, and the split between them is the point:
@@ -176,7 +177,16 @@ const tileText = (entry: CatalogEntry) => `${ entryLabel(entry, t) } ${ entryDes
 const blocks = computed(() => searchCatalog(BUILDING_BLOCKS, search.value, tileText));
 const readyMade = computed(() => searchCatalog(READY_MADE, search.value, tileText));
 // The widgets Liz wrote that an admin approved - new kinds of widget, dropped like any other
-const generated = computed(() => searchCatalog(generatedEntries(generatedWidgets(store.getters), widgetApprovals(store.getters)), search.value, tileText));
+// Only those whose code is still the code approved: one changed since would only say, once added, that
+// it needs approving again
+const lizWidgets = computed(() => generatedWidgets(store.getters));
+const lizHashes = useWidgetHashes(() => lizWidgets.value);
+const generated = computed(() => {
+  const approvals = widgetApprovals(store.getters);
+  const current = lizWidgets.value.filter((w) => !!approvals[w.name] && approvals[w.name].hash === lizHashes.value[w.name]);
+
+  return searchCatalog(generatedEntries(current, approvals), search.value, tileText);
+});
 
 const gap = computed(() => (props.view && 'gap' in props.view ? props.view.gap : DEFAULT_GAP));
 const pagePadding = computed(() => (props.view && 'pad' in props.view ? props.view.pad : DEFAULT_PAGE_PADDING));

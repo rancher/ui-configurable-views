@@ -4,6 +4,16 @@ import { useViewActions } from '@pkg/configurable-views/composables/useViewActio
 import type { PageViewsState } from '@pkg/configurable-views/composables/usePageViews';
 import type { PageViews, View } from '@pkg/configurable-views/templating/types';
 
+// The writes, kept to be read back; the rest of the engine as it is
+jest.mock('@pkg/configurable-views/templating/template-engine', () => ({
+  ...jest.requireActual('@pkg/configurable-views/templating/template-engine'),
+  saveView:                  jest.fn().mockResolvedValue(undefined),
+  deleteGeneratedView:       jest.fn().mockResolvedValue(undefined),
+  fetchTemplatingConfigMaps: jest.fn().mockResolvedValue(undefined),
+}));
+
+const engine = jest.requireMock('@pkg/configurable-views/templating/template-engine') as { saveView: jest.Mock; deleteGeneratedView: jest.Mock };
+
 describe('useViewActions deleteView', () => {
   const view = (id: string) => ({
     id, name: id, gap: 0, pad: 0, widgets: []
@@ -62,5 +72,54 @@ describe('useViewActions deleteView', () => {
 
     expect(restored.views.map((v: View) => v.id)).toStrictEqual(['a', 'b']);
     expect(restored.defaultViewId).toBe('a');
+  });
+});
+
+describe('useViewActions unpublishView', () => {
+  const view = (id: string, name = id) => ({
+    id, name, gap: 0, pad: 0, widgets: [], org: true
+  } as unknown as View);
+
+  function setUp(global: PageViews | null, shown: View) {
+    const pageViews = {
+      editing:        ref(false),
+      activeViewId:   ref(shown.id),
+      pinnedView:     ref(false),
+      saving:         ref(false),
+      error:          ref(''),
+      scopes:         ref({ global }),
+      orgIds:         ref(new Set([shown.id])),
+      views:          ref([shown]),
+      viewById:       (id: string) => (id === shown.id ? shown : undefined),
+      syncActiveView: jest.fn(),
+    } as unknown as PageViewsState;
+
+    return useViewActions(pageViews, { page: 'home', title: '' }, { dispatch: jest.fn() } as unknown as VuexStore, ((key: string) => key) as never, jest.fn().mockResolvedValue(true), ref(null), jest.fn());
+  }
+
+  beforeEach(() => {
+    engine.saveView.mockClear();
+    engine.deleteGeneratedView.mockClear();
+  });
+
+  it('takes a view Liz built away from everyone: its ConfigMap goes', async() => {
+    await setUp({ views: [view('org-a')] }, view('cm:liz-view-a')).unpublishView('cm:liz-view-a');
+
+    expect(engine.deleteGeneratedView).toHaveBeenCalledWith(expect.anything(), 'cm:liz-view-a');
+    expect(engine.saveView).not.toHaveBeenCalled();
+  });
+
+  it('takes a published copy of a view Liz built away with the original, so the original does not come back', async() => {
+    await setUp({ views: [view('org-a'), view('cm:liz-view-a', 'Platform v2')] }, view('cm:liz-view-a', 'Platform v2')).unpublishView('cm:liz-view-a');
+
+    expect(engine.saveView.mock.calls[0][2].views.map((v: View) => v.id)).toStrictEqual(['org-a']);
+    expect(engine.deleteGeneratedView).toHaveBeenCalledWith(expect.anything(), 'cm:liz-view-a');
+  });
+
+  it('takes the organization\'s own view away, and deletes no ConfigMap', async() => {
+    await setUp({ views: [view('org-a'), view('org-b')] }, view('org-b')).unpublishView('org-b');
+
+    expect(engine.saveView.mock.calls[0][2].views.map((v: View) => v.id)).toStrictEqual(['org-a']);
+    expect(engine.deleteGeneratedView).not.toHaveBeenCalled();
   });
 });

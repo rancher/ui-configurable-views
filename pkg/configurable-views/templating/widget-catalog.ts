@@ -27,6 +27,11 @@ export interface CatalogEntry {
   /** The column width it lands on the grid with. */
   span: number;
   spec: Partial<WidgetSpec> & { kind: WidgetKind };
+  /**
+   * The title the widget lands with, translated when it is added - it is then the view's own. For a
+   * ready-made widget whose title says what it was set up for.
+   */
+  titleKey?: string;
   /** A tile's name and description as they are - for an entry the catalog does not translate (a widget Liz wrote). */
   label?: string;
   desc?: string;
@@ -211,11 +216,12 @@ export const READY_MADE: CatalogEntry[] = [
     id:       'status-needs-attention',
     labelKey: 'configurableViews.catalog.statusNeedsAttention.name',
     descKey:  'configurableViews.catalog.statusNeedsAttention.desc',
+    titleKey: 'configurableViews.catalog.statusNeedsAttention.name',
     icon:     'table',
     span:     6,
     spec:     {
       kind:   WIDGET_STATUS_CARDS,
-      title:  'Needs attention',
+      title:  '',
       status: {
         ...DEFAULT_STATUS_CARDS, resources: [], cards: 'none', rows: 'type', only: 'warning', top: 10
       },
@@ -225,11 +231,12 @@ export const READY_MADE: CatalogEntry[] = [
     id:       'status-top-resources',
     labelKey: 'configurableViews.catalog.statusTopResources.name',
     descKey:  'configurableViews.catalog.statusTopResources.desc',
+    titleKey: 'configurableViews.catalog.statusTopResources.name',
     icon:     'table',
     span:     6,
     spec:     {
       kind:   WIDGET_STATUS_CARDS,
-      title:  'Top resources by count',
+      title:  '',
       status: {
         ...DEFAULT_STATUS_CARDS, resources: [], cards: 'none', rows: 'type', top: 10, colors: 'none'
       },
@@ -239,11 +246,12 @@ export const READY_MADE: CatalogEntry[] = [
     id:       'status-busiest-namespaces',
     labelKey: 'configurableViews.catalog.statusBusiestNamespaces.name',
     descKey:  'configurableViews.catalog.statusBusiestNamespaces.desc',
+    titleKey: 'configurableViews.catalog.statusBusiestNamespaces.name',
     icon:     'table',
     span:     6,
     spec:     {
       kind:   WIDGET_STATUS_CARDS,
-      title:  'Namespaces with the most pods',
+      title:  '',
       status: {
         ...DEFAULT_STATUS_CARDS, cards: 'none', rows: 'namespace', top: 10
       },
