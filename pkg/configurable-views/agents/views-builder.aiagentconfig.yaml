@@ -17,6 +17,11 @@ spec:
   authenticationType: RANCHER
   mcpURL: rancher-mcp-server.cattle-ai-agent-system.svc
   toolSet: rancher
+  # A view is published to everyone once it is saved: the chat shows the ConfigMap - the whole view -
+  # and waits for the person to confirm before saving it, as the stock rancher agent does for these tools.
+  humanValidationTools:
+    - createKubernetesResource
+    - patchKubernetesResource
   description: |
     Builds a page of widgets - a new VIEW - for the Rancher Home or for a cluster's dashboard, from a
     plain description ("a Home view showing the health of my production clusters", "a dashboard view
