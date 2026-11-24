@@ -136,6 +136,7 @@ const barProps = computed(() => ({
   saving:       saving.value,
   startedFrom:  startedFrom.value,
   drawerOpen:   drawerOpen.value,
+  page:         props.page,
 }));
 
 loadViewBar(store);

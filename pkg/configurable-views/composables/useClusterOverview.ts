@@ -1,6 +1,4 @@
-import {
-  computed, onBeforeUnmount, onMounted, ref, toValue, watch, type MaybeRefOrGetter
-} from 'vue';
+import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
 import { useStore } from 'vuex';
 import type { RouteLocationRaw } from 'vue-router';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
@@ -16,7 +14,8 @@ import {
   type WorkloadDashboardStateCard,
   type WorkloadDashboardByStateLayout,
 } from '@shell/pages/c/_cluster/explorer/workload-dashboard/types';
-import { fetchStateSummaries, type StateSummary } from '../templating/widget-data';
+import { clusterGone, fetchStateSummaries, type StateSummary } from '../templating/widget-data';
+import { usePolledLoad, type PolledRead } from './usePolledLoad';
 
 // The Workloads overview's numbers - by state, by type, by namespace - for ONE NAMED cluster.
 //
@@ -45,11 +44,7 @@ export function useClusterOverview(cluster: MaybeRefOrGetter<string>) {
   const { toStateColor, resolveStateColors } = useStateColor();
 
   const summaries = ref<StateSummary[]>([]);
-  const loading = ref(false);
   const error = ref('');
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  // A cluster change mid-request must not let the old cluster's answer land.
-  let asked = 0;
 
   const labelOf = (type: string) => t(`typeLabel."${ type }"`, { count: 2 })?.trim() || type;
 
@@ -193,9 +188,14 @@ export function useClusterOverview(cluster: MaybeRefOrGetter<string>) {
 
   // ── Fetching & polling ──
 
-  async function load(): Promise<void> {
+  /** Read the summaries. Resolves false when the cluster is no longer in Rancher: nothing to refresh then. */
+  async function load({ current, fresh }: PolledRead): Promise<boolean | void> {
     const id = toValue(cluster);
-    const mine = ++asked;
+
+    if (fresh) {
+      summaries.value = [];
+      error.value = '';
+    }
 
     if (!id) {
       summaries.value = [];
@@ -203,10 +203,19 @@ export function useClusterOverview(cluster: MaybeRefOrGetter<string>) {
       return;
     }
 
+    // A cluster removed since the view was saved: said at once, rather than after its API's long wait
+    if (fresh && await clusterGone(store, id)) {
+      if (current()) {
+        error.value = t('configurableViews.errors.clusterGone', { cluster: id });
+      }
+
+      return false;
+    }
+
     try {
       const results = await fetchStateSummaries(store, id, WORKLOAD_DASHBOARD_RESOURCE_TYPES);
 
-      if (mine !== asked) {
+      if (!current()) {
         return;
       }
 
@@ -214,53 +223,13 @@ export function useClusterOverview(cluster: MaybeRefOrGetter<string>) {
       summaries.value = results;
       error.value = results.every((r) => r.error) ? t('configurableViews.errors.workloads', { cluster: id }) : '';
     } catch (e) {
-      if (mine === asked) {
+      if (current()) {
         error.value = (e as Error)?.message || t('configurableViews.errors.workloads', { cluster: id });
       }
     }
   }
 
-  function stop(): void {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  function start(): void {
-    stop();
-    pollTimer = setInterval(load, POLL_MS);
-  }
-
-  function onVisibility(): void {
-    if (document.hidden) {
-      stop();
-    } else {
-      load();
-      start();
-    }
-  }
-
-  watch(() => toValue(cluster), async() => {
-    summaries.value = [];
-    error.value = '';
-    loading.value = true;
-    await load();
-    loading.value = false;
-  });
-
-  onMounted(async() => {
-    loading.value = true;
-    await load();
-    loading.value = false;
-    start();
-    document.addEventListener('visibilitychange', onVisibility);
-  });
-
-  onBeforeUnmount(() => {
-    stop();
-    document.removeEventListener('visibilitychange', onVisibility);
-  });
+  const { loading } = usePolledLoad(load, { ms: POLL_MS, source: () => toValue(cluster) });
 
   return {
     loading, error, hasWorkloads, byStateLayout, byTypeCards, byNamespaceCards, resourceRoute, filterByNamespace

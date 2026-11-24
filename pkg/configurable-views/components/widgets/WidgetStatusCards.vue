@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import {
-  computed, onBeforeUnmount, onMounted, ref, watch
-} from 'vue';
+import { computed, ref } from 'vue';
 import type { RouteLocationRaw } from 'vue-router';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
@@ -13,11 +11,12 @@ import type { StatusSummaryCardProps } from '@shell/components/Resource/Detail/C
 import type { StatusBreakdownCardProps } from '@shell/components/Resource/Detail/Card/StatusBreakdownCard/types';
 import { NAMESPACE } from '@shell/config/types';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
-import { colorForState, stateDisplay } from '@shell/plugins/dashboard-store/resource-class';
+import { stateDisplay } from '@shell/plugins/dashboard-store/resource-class';
 import type { StateColor } from '@shell/utils/style';
 import { ucFirst } from '@shell/utils/string';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
-import { fetchClusterCounts, fetchStateSummaries } from '../../templating/widget-data';
+import { usePolledLoad, type PolledRead } from '../../composables/usePolledLoad';
+import { clusterGone, fetchClusterCounts, fetchStateSummaries, stateColorByName } from '../../templating/widget-data';
 import {
   buildStatusCards, countsFromClusterCounts, countsFromSummaries, normalizeStatusCards,
   type StatusCardData, type StatusCount, type StatusRow
@@ -53,15 +52,33 @@ const fromCounts = computed(() => !config.value.resources.length);
 const POLL_MS = 30000;
 
 const counts = ref<StatusCount[]>([]);
-const loading = ref(false);
 const error = ref('');
-let timer: ReturnType<typeof setInterval> | null = null;
-// A setting or cluster change mid-request must not let the old answer land.
-let asked = 0;
 
-async function load(): Promise<void> {
+/**
+ * Whether the widget's cluster was removed from Rancher since the view was saved - then it says so,
+ * rather than wait on that cluster's API, which answers a removed cluster only slowly and with an error
+ * that does not say why.
+ */
+async function isGone(id: string, current: () => boolean): Promise<boolean> {
+  if (!(await clusterGone(store, id))) {
+    return false;
+  }
+  if (current()) {
+    counts.value = [];
+    error.value = t('configurableViews.errors.clusterGone', { cluster: id });
+  }
+
+  return true;
+}
+
+/** Read the counts. Resolves false when the cluster is no longer in Rancher: nothing to refresh then. */
+async function load({ current, fresh }: PolledRead): Promise<boolean | void> {
   const id = cluster.value;
-  const mine = ++asked;
+
+  if (fresh) {
+    counts.value = [];
+    error.value = '';
+  }
 
   if (!id) {
     counts.value = [];
@@ -69,80 +86,51 @@ async function load(): Promise<void> {
     return;
   }
 
+  if (fresh && await isGone(id, current)) {
+    return false;
+  }
+
   try {
     if (fromCounts.value) {
       const all = await fetchClusterCounts(store, id);
 
-      if (mine === asked) {
+      if (current()) {
         counts.value = countsFromClusterCounts(all);
+        error.value = '';
       }
-    } else {
-      const summaries = await fetchStateSummaries(store, id, config.value.resources);
-
-      if (mine !== asked) {
-        return;
-      }
-      await resolveStateColors(summaries);
-      counts.value = countsFromSummaries(summaries);
-      error.value = summaries.every((s) => s.error) ? t('configurableViews.status.error', { cluster: id }) : '';
 
       return;
     }
-    error.value = '';
+
+    const summaries = await fetchStateSummaries(store, id, config.value.resources);
+
+    if (!current()) {
+      return;
+    }
+    await resolveStateColors(summaries);
+    counts.value = countsFromSummaries(summaries);
+    error.value = summaries.every((s) => s.error) ? t('configurableViews.status.error', { cluster: id }) : '';
   } catch (e) {
-    if (mine === asked) {
+    if (current()) {
       error.value = (e as Error)?.message || t('configurableViews.status.error', { cluster: id });
     }
   }
+
+  // A refresh that failed may be about a cluster removed while the page was open: then stop asking it
+  if (!fresh && error.value && current() && await isGone(id, current)) {
+    return false;
+  }
 }
 
-async function reload(): Promise<void> {
-  counts.value = [];
-  error.value = '';
-  loading.value = true;
-  await load();
-  loading.value = false;
-}
-
-// Each value watched on its own: an array built afresh in one getter is never equal to the last, so
-// it would reload - and flash the spinner - whenever the widget's spec is replaced by an equal one,
+// Watched as one string, not the arrays themselves: an array built afresh is never equal to the last,
+// so it would reload - and flash the spinner - whenever the widget's spec is replaced by an equal one,
 // which happens each time the stored views are read again.
-watch([cluster, () => config.value.resources.join(',')], reload);
-
-function onVisibility(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-  if (!document.hidden) {
-    load();
-    timer = setInterval(load, POLL_MS);
-  }
-}
-
-onMounted(async() => {
-  await reload();
-  timer = setInterval(load, POLL_MS);
-  document.addEventListener('visibilitychange', onVisibility);
-});
-
-onBeforeUnmount(() => {
-  if (timer) {
-    clearInterval(timer);
-  }
-  document.removeEventListener('visibilitychange', onVisibility);
-});
+const { loading } = usePolledLoad(load, { ms: POLL_MS, source: () => `${ cluster.value }|${ config.value.resources.join(',') }` });
 
 // ---- the cards ----
 
 function rancherColor(state: string, type: string): StateColor {
-  if (fromCounts.value) {
-    const raw = colorForState(state.toLowerCase(), false, false).replace('text-', '');
-
-    return (raw === 'darker' ? 'disabled' : raw) as StateColor;
-  }
-
-  return toStateColor(state, type);
+  return fromCounts.value ? stateColorByName(state) : toStateColor(state, type);
 }
 
 const data = computed<StatusCardData[]>(() => buildStatusCards(counts.value, config.value, { stateColor: rancherColor }));

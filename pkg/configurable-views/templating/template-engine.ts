@@ -203,7 +203,7 @@ export function generatedViews(getters: Getters, page: PageKey = PAGE_HOME): Vie
  * Ids for the widgets of a view in a ConfigMap of its own, where they have none - Liz and the examples
  * leave them out. Made from the view and the widget's place, so they are the same every time the view
  * is read: a new id each read would make the page take them for new widgets and draw them all again,
- * every time the stored views are read (every few seconds).
+ * every time the stored views are read - which is whenever any of this package's ConfigMaps changes.
  */
 function withStableIds(widgets: unknown, prefix: string): unknown {
   if (!Array.isArray(widgets)) {
@@ -273,23 +273,59 @@ export function generatedWidgets(getters: Getters): GeneratedWidget[] {
     .sort((a: GeneratedWidget, b: GeneratedWidget) => a.displayName.localeCompare(b.displayName));
 }
 
-/**
- * Which widgets' code an admin approved, and exactly which code: widget name -> the SHA-256 of the
- * source approved. A widget runs only while its source still has that hash, so any change - by Liz
- * or by hand - needs approving again. Kept beside the kill switch, in templating-config.
- */
-export function widgetApprovals(getters: Getters): Record<string, string> {
-  const parsed = parse(cmNamed(getters, CONFIG_NAME)?.data?.approvedWidgets) as Record<string, unknown>;
-
-  return Object.fromEntries(Object.entries(parsed).filter(([, hash]) => typeof hash === 'string')) as Record<string, string>;
+/** An approval of a widget's code: exactly which code (the SHA-256 of its source), who approved it and when. */
+export interface WidgetApproval {
+  hash: string;
+  /** The approver's username, or user id. Empty for an approval recorded before this was kept. */
+  by: string;
+  /** When, as an ISO date. Empty for an approval recorded before this was kept. */
+  at: string;
 }
 
-/** Approve a widget's code as it is now (its hash), or revoke the approval (null). */
+/**
+ * Which widgets' code was approved, and exactly which code: widget name -> its approval. A widget runs
+ * only while its source still has the approved hash, so any change - by Liz or by hand - needs
+ * approving again. Kept in templating-config, as one JSON string.
+ *
+ * WHO CAN APPROVE is whoever may write ConfigMaps in this namespace - the same people who can write
+ * the widgets, and publish views to everyone (templating-home is here too). Approved code runs in
+ * Rancher for everyone who opens a page with the widget, with that person's access, so that write
+ * access belongs to admins only. A real separation waits for the views' own CRD.
+ *
+ * An approval recorded as just the hash, before who and when were kept, still counts.
+ */
+export function widgetApprovals(getters: Getters): Record<string, WidgetApproval> {
+  const parsed = parse(cmNamed(getters, CONFIG_NAME)?.data?.approvedWidgets) as Record<string, unknown>;
+  const out: Record<string, WidgetApproval> = {};
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+  for (const [name, value] of Object.entries(parsed)) {
+    if (typeof value === 'string' && value) {
+      out[name] = {
+        hash: value, by: '', at: ''
+      };
+    } else if (value && typeof value === 'object' && text((value as WidgetApproval).hash)) {
+      const v = value as WidgetApproval;
+
+      out[name] = {
+        hash: v.hash, by: text(v.by), at: text(v.at)
+      };
+    }
+  }
+
+  return out;
+}
+
+/** Approve a widget's code - the source with this hash - as the person signed in, or revoke the approval (null). */
 export async function setWidgetApproval(store: VuexStore, name: string, hash: string | null): Promise<void> {
   const approvals = { ...widgetApprovals(store.getters) };
 
   if (hash) {
-    approvals[name] = hash;
+    const user = store.getters['auth/user'] as { username?: string; id?: string } | null;
+
+    approvals[name] = {
+      hash, by: user?.username || user?.id || '', at: new Date().toISOString()
+    };
   } else {
     delete approvals[name];
   }
@@ -313,6 +349,23 @@ export async function setWidgetApproval(store: VuexStore, name: string, hash: st
   });
 
   await cm.save();
+}
+
+/**
+ * Whether the person signed in can approve widgets: change templating-config, where approvals are
+ * kept - or, before there is one, create ConfigMaps. The same RBAC the write itself meets, so nobody is
+ * offered buttons that can only fail.
+ */
+export function canApproveWidgets(getters: Getters): boolean {
+  const config = cmNamed(getters, CONFIG_NAME) as (ConfigMapModel & { canUpdate?: boolean }) | undefined;
+
+  if (config) {
+    return !!config.canUpdate;
+  }
+
+  const schema = getters['management/schemaFor']?.(CONFIG_MAP) as { collectionMethods?: string[] } | undefined;
+
+  return !!schema?.collectionMethods?.some((method) => method.toUpperCase() === 'POST');
 }
 
 /** Remove a widget Liz wrote: its ConfigMap goes, and its approval with it. */

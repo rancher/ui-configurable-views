@@ -1,11 +1,15 @@
-import { shallowMount } from '@vue/test-utils';
+import { flushPromises, shallowMount } from '@vue/test-utils';
 import { RcButton } from '@components/RcButton';
+import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
+import { SCHEMA } from '@shell/config/types';
 import BannerSettings from '@pkg/configurable-views/components/widgets/settings/BannerSettings.vue';
 import LinksSettings from '@pkg/configurable-views/components/widgets/settings/LinksSettings.vue';
 import TabsSettings from '@pkg/configurable-views/components/widgets/settings/TabsSettings.vue';
 import StatusCardsSettings from '@pkg/configurable-views/components/widgets/settings/StatusCardsSettings.vue';
 import { DEFAULT_STATUS_CARDS } from '@pkg/configurable-views/templating/status-cards';
 import type { WidgetSpec } from '@pkg/configurable-views/templating/types';
+
+jest.mock('vue-router', () => ({ useRoute: () => ({ params: {} }) }));
 
 const global = { provide: { store: { getters: { 'i18n/t': (key: string) => key } } } };
 
@@ -96,9 +100,30 @@ describe('a widget\'s own settings', () => {
     const status = (changes = {}) => ({ kind: 'statusCards', status: { ...DEFAULT_STATUS_CARDS, ...changes } } as WidgetSpec);
     const lastStatus = (wrapper: ReturnType<typeof shallowMount>) => (wrapper.emitted('update')?.pop()?.[0] as WidgetSpec).status;
 
+    // On the Home, a widget with no cluster is offered the local cluster's types, as a table is
+    const localSchemas = [
+      {
+        id: 'pod', canList: true, attributes: { kind: 'Pod' }
+      },
+      {
+        id: 'apps.deployment', canList: true, attributes: { kind: 'Deployment', group: 'apps' }
+      },
+    ];
+    const withSchemas = {
+      provide: {
+        store: {
+          getters: {
+            'i18n/t':         (key: string) => key,
+            'management/all': (type: string) => (type === SCHEMA ? localSchemas : []),
+          },
+          dispatch: jest.fn(),
+        }
+      }
+    };
+
     it('hands back every card setting with the one that changed', async() => {
       const widget = status();
-      const wrapper = shallowMount(StatusCardsSettings, { props: { widget }, global });
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget }, global: withSchemas });
 
       await wrapper.find('[data-testid="configurable-views-status-cards"]').setValue('namespace');
 
@@ -106,18 +131,28 @@ describe('a widget\'s own settings', () => {
       expect(widget.status?.cards).toBe('type');
     });
 
-    it('reads the types as a list, and the custom colours as one state each, leaving out a colour it does not know', async() => {
-      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status({ colors: 'custom' }) }, global });
+    it('offers the types of where it counts, keeps one typed in that is not among them, and hands back the list picked', async() => {
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status({ resources: ['example.io.widget'] }) }, global: withSchemas });
 
-      await wrapper.find('[data-testid="configurable-views-status-resources"]').setValue('pod, apps.deployment,');
+      await flushPromises();
+      const picker = wrapper.findComponent(LabeledSelect);
+
+      expect(picker.attributes('multiple')).toBe('true');
+      expect((picker.props('options') as { value: string }[]).map((o) => o.value)).toStrictEqual(['example.io.widget', 'group:core', 'pod', 'group:apps', 'apps.deployment']);
+
+      picker.vm.$emit('update:value', ['pod', 'apps.deployment']);
       expect(lastStatus(wrapper)?.resources).toStrictEqual(['pod', 'apps.deployment']);
+    });
+
+    it('reads the custom colours as one state each, leaving out a colour it does not know', async() => {
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status({ colors: 'custom' }) }, global: withSchemas });
 
       await wrapper.find('textarea').setValue('Running=success\npending=purple\nfailed = error');
       expect(lastStatus(wrapper)?.customColors).toStrictEqual({ running: 'success', failed: 'error' });
     });
 
     it('asks for custom colours only when they are custom', () => {
-      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status() }, global });
+      const wrapper = shallowMount(StatusCardsSettings, { props: { widget: status() }, global: withSchemas });
 
       expect(wrapper.find('textarea').exists()).toBe(false);
     });

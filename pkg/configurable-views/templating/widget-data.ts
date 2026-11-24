@@ -21,6 +21,7 @@ import {
 } from '@shell/config/types';
 import { NODE_ROLES } from '@shell/config/labels-annotations';
 import { colorForState } from '@shell/plugins/dashboard-store/resource-class';
+import type { StateColor } from '@shell/utils/style';
 import { colorToCountName } from '@shell/components/ResourceSummary';
 import { getClusterPrefix } from '@shell/utils/grafana';
 import { RESOURCES as DASHBOARD_RESOURCES } from '@shell/pages/c/_cluster/explorer/index.vue';
@@ -125,6 +126,36 @@ export async function fetchClusterSchemas(store: VuexStore, cluster: string): Pr
 /** The management cluster behind a cluster id: name, state, provider, version, capacity. */
 export function fetchManagementCluster<T = ResourceRow>(store: VuexStore, cluster: string): Promise<T> {
   return store.dispatch('management/find', { type: MANAGEMENT.CLUSTER, id: cluster });
+}
+
+/**
+ * Whether Rancher no longer has a cluster - true only when it answers that it has none.
+ *
+ * A widget saved with a cluster that was removed since would otherwise wait on that cluster's own API,
+ * which answers a removed cluster only after a long wait (about 14 seconds), with a 500 that does not
+ * say why - and would ask again at every refresh. The cluster's record answers at once. Any other
+ * failure is not an answer, and is left to the widget's own read.
+ */
+export async function clusterGone(store: VuexStore, cluster: string): Promise<boolean> {
+  try {
+    await fetchManagementCluster(store, cluster);
+
+    return false;
+  } catch (e) {
+    const err = e as { _status?: number; status?: number; code?: string } | null;
+
+    return err?._status === 404 || err?.status === 404 || err?.code === 'NotFound';
+  }
+}
+
+/**
+ * Rancher's colour for a state known only by its name - the coarse states of a cluster's `counts`
+ * (error, in progress, …), which come without a type to look the state up on.
+ */
+export function stateColorByName(state: string): StateColor {
+  const raw = colorForState(`${ state }`.toLowerCase(), false, false).replace('text-', '');
+
+  return (raw === 'darker' ? 'disabled' : raw) as StateColor;
 }
 
 // A header and a row of cards for the same cluster both want its counts, at the same moment. One

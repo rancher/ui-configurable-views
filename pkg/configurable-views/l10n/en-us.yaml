@@ -153,6 +153,7 @@ configurableViews:
     capacity: "Could not read the capacity of cluster “{cluster}”."
     certificates: "Could not read the certificates of cluster “{cluster}”."
     cluster: "Could not read the cluster “{cluster}”."
+    clusterGone: "The cluster “{cluster}” is no longer in Rancher. Edit the view to pick another cluster, or remove this widget."
     componentStatus: "Could not read the component status of cluster “{cluster}”."
     counts: "Could not read the counts of cluster “{cluster}”."
     savePreference: Could not save your preference.
@@ -168,14 +169,23 @@ configurableViews:
       namespace: By namespace
   generatedAdmin:
     title: Widgets written by Liz
-    intro: Liz can write new widgets. Their code runs in everyone’s browser, so each one stays off until an admin reads it and approves it. Approving covers the code exactly as it is - if it changes, it stops until it is approved again.
+    intro: Liz can write new widgets. Their code runs in Rancher for everyone who opens a page with them, with that person’s access, so each one stays off until someone who can approve reads its code and approves it. Approving covers the code exactly as it was read - if it changes, it stops until it is approved again.
     none: Liz has not written any widgets yet. Ask Liz to “create a widget that …”.
     showCode: Show code
     hideCode: Hide code
     approve: Approve
     approveAgain: Approve again
+    approvedBy: "Approved by {by}"
+    readFirst: Show the code and read it to approve it.
+    codeChanged: The code changed since you opened it. Hide it and show it again to read the new code before approving.
     revoke: Revoke
+    revokeConfirm:
+      title: "Revoke “{name}”?"
+      body: It stops running everywhere at once, on every page that has it, until it is approved again.
     delete: Delete
+    deleteConfirm:
+      title: "Delete “{name}”?"
+      body: Its code is deleted for good, with its approval. Pages that have it show that it is not there any more.
     failed: Could not change the widget
     approved: “{name}” approved - it is in the Add tab now.
     revoked: “{name}” revoked - it no longer runs anywhere.
@@ -218,8 +228,8 @@ configurableViews:
     viewsHint: Columns, sort, filter and grouping are set in the table itself. With the tabs shown they can be saved as views - shared with every list of this type, or kept for this widget alone.
     status:
       resources: Resources
-      resourcesPlaceholder: pod, apps.deployment
-      resourcesHint: Types to count, comma-separated. Leave it empty to count every type the cluster has.
+      resourcesPlaceholder: Every type
+      resourcesHint: The types to count - pick them, or type one only another cluster has. Leave it empty to count every type the cluster has.
       namespace: Namespace
       namespacePlaceholder: All namespaces
       cards: Cards

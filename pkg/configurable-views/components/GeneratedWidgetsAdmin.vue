@@ -5,19 +5,26 @@ import { useI18n } from '@shell/composables/useI18n';
 import { useShell } from '@shell/apis';
 import { NotificationLevel } from '@shell/types/notifications';
 import { BadgeState } from '@components/BadgeState';
+import LiveDate from '@shell/components/formatter/LiveDate.vue';
 import {
-  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps
+  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps, canApproveWidgets
 } from '../templating/template-engine';
 import { widgetHash } from '../templating/widget-hash';
 import { reviewWidget } from '../templating/widget-review';
+import { useConfirm } from '../composables/useConfirm';
 
 // The widgets Liz wrote, and the gate in front of them: an admin reads each one's code and approves
-// it. Approving records the hash of the code as it is, so a widget runs only as long as its code is
-// what was read - a change sends it back here. Revoking stops it everywhere at once.
+// it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
+// is what was read - a change sends it back here. Revoking stops it everywhere at once.
+//
+// Only for those who can approve (see canApproveWidgets): anyone else would be shown buttons that fail.
 
 const store = useStore();
 const { t } = useI18n(store);
 const shell = useShell();
+const confirm = useConfirm();
+
+const canApprove = computed(() => canApproveWidgets(store.getters));
 
 // Settings opens without them otherwise: the switch above it is a preference.
 onMounted(() => fetchTemplatingConfigMaps(store));
@@ -50,7 +57,7 @@ function statusOf(name: string): Status {
     return 'pending';
   }
 
-  return approved === hashes.value[name] ? 'approved' : 'changed';
+  return approved.hash === hashes.value[name] ? 'approved' : 'changed';
 }
 
 const COLOR: Record<Status, string> = {
@@ -59,6 +66,29 @@ const COLOR: Record<Status, string> = {
 
 const open = ref<Record<string, boolean>>({});
 const busy = ref('');
+
+// The hash of each widget's code as it was when its code was opened. Approve approves that, and only
+// while the code is still the same: an approval covers code someone read, never a newer version that
+// arrived while it was open.
+const readHash = ref<Record<string, string>>({});
+
+function toggleCode(name: string): void {
+  open.value[name] = !open.value[name];
+
+  if (open.value[name]) {
+    readHash.value[name] = hashes.value[name];
+  }
+}
+
+type ReadState = 'unread' | 'read' | 'changed';
+
+function readState(name: string): ReadState {
+  if (!readHash.value[name]) {
+    return 'unread';
+  }
+
+  return readHash.value[name] === hashes.value[name] ? 'read' : 'changed';
+}
 
 async function run(name: string, action: () => Promise<void>, done: string): Promise<void> {
   busy.value = name;
@@ -74,13 +104,43 @@ async function run(name: string, action: () => Promise<void>, done: string): Pro
   }
 }
 
-const approve = (name: string) => run(name, () => setWidgetApproval(store, name, hashes.value[name]), t('configurableViews.generatedAdmin.approved', { name }));
-const revoke = (name: string) => run(name, () => setWidgetApproval(store, name, null), t('configurableViews.generatedAdmin.revoked', { name }));
-const remove = (name: string) => run(name, () => deleteGeneratedWidget(store, name), t('configurableViews.generatedAdmin.deleted', { name }));
+function approve(name: string): Promise<void> | void {
+  if (readState(name) !== 'read') {
+    return;
+  }
+
+  return run(name, () => setWidgetApproval(store, name, readHash.value[name]), t('configurableViews.generatedAdmin.approved', { name }));
+}
+
+async function revoke(name: string): Promise<void> {
+  if (await confirm({
+    title:  t('configurableViews.generatedAdmin.revokeConfirm.title', { name }),
+    body:   t('configurableViews.generatedAdmin.revokeConfirm.body', { name }),
+    action: t('configurableViews.generatedAdmin.revoke'),
+    danger: true,
+  })) {
+    await run(name, () => setWidgetApproval(store, name, null), t('configurableViews.generatedAdmin.revoked', { name }));
+  }
+}
+
+async function remove(name: string): Promise<void> {
+  if (await confirm({
+    title:  t('configurableViews.generatedAdmin.deleteConfirm.title', { name }),
+    body:   t('configurableViews.generatedAdmin.deleteConfirm.body', { name }),
+    action: t('configurableViews.generatedAdmin.delete'),
+    danger: true,
+  })) {
+    await run(name, () => deleteGeneratedWidget(store, name), t('configurableViews.generatedAdmin.deleted', { name }));
+  }
+}
 </script>
 
 <template>
-  <div class="gwa">
+  <div
+    v-if="canApprove"
+    class="gwa"
+    data-testid="generated-widgets-admin"
+  >
     <h2 class="mb-5">
       {{ t('configurableViews.generatedAdmin.title') }}
     </h2>
@@ -106,10 +166,25 @@ const remove = (name: string) => run(name, () => deleteGeneratedWidget(store, na
           <strong>{{ w.displayName }}</strong>
           <span class="text-muted">{{ w.name }}</span>
         </div>
-        <BadgeState
-          :label="t(`configurableViews.generatedAdmin.status.${ statusOf(w.name) }`)"
-          :color="COLOR[statusOf(w.name)]"
-        />
+        <div class="gwa__status">
+          <BadgeState
+            :label="t(`configurableViews.generatedAdmin.status.${ statusOf(w.name) }`)"
+            :color="COLOR[statusOf(w.name)]"
+          />
+          <span
+            v-if="approvals[w.name]?.by"
+            class="text-muted"
+            :data-testid="`generated-widget-approved-by-${ w.name }`"
+          >
+            {{ t('configurableViews.generatedAdmin.approvedBy', { by: approvals[w.name].by }) }}
+            <LiveDate
+              v-if="approvals[w.name].at"
+              :value="approvals[w.name].at"
+              :add-suffix="true"
+              :show-tooltip="true"
+            />
+          </span>
+        </div>
       </div>
       <p
         v-if="w.description"
@@ -147,14 +222,15 @@ const remove = (name: string) => run(name, () => deleteGeneratedWidget(store, na
       <div class="gwa__actions">
         <button
           class="btn btn-sm role-secondary"
-          @click="open[w.name] = !open[w.name]"
+          :data-testid="`generated-widget-code-${ w.name }`"
+          @click="toggleCode(w.name)"
         >
           {{ open[w.name] ? t('configurableViews.generatedAdmin.hideCode') : t('configurableViews.generatedAdmin.showCode') }}
         </button>
         <button
           v-if="statusOf(w.name) !== 'approved'"
           class="btn btn-sm role-primary"
-          :disabled="busy === w.name || !hashes[w.name]"
+          :disabled="busy === w.name || readState(w.name) !== 'read'"
           :data-testid="`generated-widget-approve-${ w.name }`"
           @click="approve(w.name)"
         >
@@ -171,11 +247,20 @@ const remove = (name: string) => run(name, () => deleteGeneratedWidget(store, na
         <button
           class="btn btn-sm role-link"
           :disabled="busy === w.name"
+          :data-testid="`generated-widget-delete-${ w.name }`"
           @click="remove(w.name)"
         >
           {{ t('configurableViews.generatedAdmin.delete') }}
         </button>
       </div>
+      <!-- Approving needs the code read first: says so, until it is - or since it changed -->
+      <p
+        v-if="statusOf(w.name) !== 'approved' && readState(w.name) !== 'read'"
+        class="gwa__hint text-muted"
+        :data-testid="`generated-widget-read-hint-${ w.name }`"
+      >
+        {{ t(`configurableViews.generatedAdmin.${ readState(w.name) === 'changed' ? 'codeChanged' : 'readFirst' }`) }}
+      </p>
 
       <pre
         v-if="open[w.name]"
@@ -210,8 +295,19 @@ const remove = (name: string) => run(name, () => deleteGeneratedWidget(store, na
     gap:            2px;
   }
 
+  &__status {
+    align-items: center;
+    display:     flex;
+    flex-wrap:   wrap;
+    gap:         8px;
+  }
+
   &__desc {
     margin: 8px 0 0;
+  }
+
+  &__hint {
+    margin: 6px 0 0;
   }
 
   &__review {

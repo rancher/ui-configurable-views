@@ -1,7 +1,7 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  appliedViewScopes, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView, setWidgetApproval, toggleTemplating,
-  viewsOffInUrl, widgetApprovals
+  appliedViewScopes, canApproveWidgets, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView, setWidgetApproval,
+  toggleTemplating, viewsOffInUrl, widgetApprovals
 } from '@pkg/configurable-views/templating/template-engine';
 import { PREF_ENABLED, PREF_VIEWS } from '@pkg/configurable-views/templating/user-prefs';
 import type { PageViews } from '@pkg/configurable-views/templating/types';
@@ -271,19 +271,71 @@ describe('widgets Liz wrote', () => {
     ]);
   });
 
-  it('keeps approvals in templating-config, by the hash of the code approved, and what else it holds as it was', async() => {
+  it('keeps approvals in templating-config - the hash of the code approved, who approved it and when - and what else it holds as it was', async() => {
+    jest.useFakeTimers({ now: new Date('2026-11-24T10:00:00Z') });
     const config = configMap('templating-config', { enabled: 'true' });
     const { store } = storeWith([config]);
 
+    (store.getters as Record<string, unknown>)['auth/user'] = { id: 'u-abc', username: 'admin' };
     await setWidgetApproval(store, 'liz-widget-a', 'h1');
+    jest.useRealTimers();
 
-    expect(JSON.parse(config.data.approvedWidgets)).toStrictEqual({ 'liz-widget-a': 'h1' });
+    const approval = {
+      hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00.000Z'
+    };
+
+    expect(JSON.parse(config.data.approvedWidgets)).toStrictEqual({ 'liz-widget-a': approval });
     expect(config.data.enabled).toBe('true');
-    expect(widgetApprovals(store.getters)).toStrictEqual({ 'liz-widget-a': 'h1' });
+    expect(widgetApprovals(store.getters)).toStrictEqual({ 'liz-widget-a': approval });
 
     await setWidgetApproval(store, 'liz-widget-a', null);
 
     expect(widgetApprovals(store.getters)).toStrictEqual({});
+  });
+
+  it('still counts an approval kept as just the hash, and ignores one with no hash', () => {
+    const { store } = storeWith([configMap('templating-config', {
+      approvedWidgets: {
+        'liz-widget-old': 'h0',
+        'liz-widget-new': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
+        },
+        'liz-widget-bad':   { by: 'admin' },
+        'liz-widget-empty': ''
+      }
+    })]);
+
+    expect(widgetApprovals(store.getters)).toStrictEqual({
+      'liz-widget-old': {
+        hash: 'h0', by: '', at: ''
+      },
+      'liz-widget-new': {
+        hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
+      },
+    });
+  });
+
+  describe('who can approve', () => {
+    it('is whoever can change templating-config, once there is one', () => {
+      const config = { ...configMap('templating-config', {}), canUpdate: false };
+      const { store } = storeWith([config]);
+
+      expect(canApproveWidgets(store.getters)).toBe(false);
+      config.canUpdate = true;
+      expect(canApproveWidgets(store.getters)).toBe(true);
+    });
+
+    it('is whoever can create ConfigMaps, before there is one', () => {
+      const { store } = storeWith([]);
+      const getters = store.getters as Record<string, unknown>;
+
+      getters['management/schemaFor'] = () => ({ collectionMethods: ['GET', 'post'] });
+      expect(canApproveWidgets(store.getters)).toBe(true);
+      getters['management/schemaFor'] = () => ({ collectionMethods: ['GET'] });
+      expect(canApproveWidgets(store.getters)).toBe(false);
+      getters['management/schemaFor'] = () => undefined;
+      expect(canApproveWidgets(store.getters)).toBe(false);
+    });
   });
 });
 

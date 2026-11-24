@@ -75,6 +75,8 @@ const props = withDefaults(defineProps<{
   startedFrom?: string;
   /** Whether the editor's drawer is open, while editing. */
   drawerOpen?: boolean;
+  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll). */
+  page?: string;
 }>(), {
   views:        () => [],
   activeId:     '',
@@ -87,6 +89,7 @@ const props = withDefaults(defineProps<{
   saving:       false,
   startedFrom:  '',
   drawerOpen:   true,
+  page:         '',
 });
 
 const emit = defineEmits<BarEmits>();
@@ -97,8 +100,6 @@ const { t } = useI18n(store);
 const root = ref<HTMLElement | null>(null);
 
 const tabStrip = ref<HTMLElement | null>(null);
-
-// The editable name while editing - inside the tab loop, so a list; at most one is rendered.
 
 /** Function refs, as there is a set per tab */
 const tabWraps = new Map<string, HTMLElement>();
@@ -482,7 +483,7 @@ onMounted(() => {
       return;
     }
 
-    strip.scrollLeft = viewBarScroll.left;
+    strip.scrollLeft = viewBarScroll[props.page] || 0;
 
     if (active) {
       const tab = active.getBoundingClientRect();
@@ -496,7 +497,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  viewBarScroll.left = tabStrip.value?.scrollLeft || 0;
+  viewBarScroll[props.page] = tabStrip.value?.scrollLeft || 0;
   window.removeEventListener('keydown', onShortcut);
   clearTimeout(flashTimer);
   cancelAnimationFrame(flashFrame);

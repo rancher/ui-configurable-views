@@ -39,10 +39,11 @@ export function isListable(schema: TypeSchema): boolean {
  * The picker's entries: every listable type, under its API group - the core group first, then the
  * others by name - each named by its kind, with its group only when two groups share the kind.
  *
- * `current` is the type the widget already shows. When it is not among them (typed in by hand, or
- * not on this cluster) it leads the list, so the picker never silently drops it.
+ * `current` is the type the widget already shows - or the types, for one that shows several. One that
+ * is not among them (typed in by hand, or not on this cluster) leads the list, so the picker never
+ * silently drops it.
  */
-export function typeOptions(schemas: TypeSchema[], current = ''): TypeOption[] {
+export function typeOptions(schemas: TypeSchema[], current: string | string[] = ''): TypeOption[] {
   const listable = schemas.filter(isListable);
   const groupOf = (schema: TypeSchema) => schema.attributes?.group || CORE;
   const kindOf = (schema: TypeSchema) => schema.attributes?.kind || schema.id;
@@ -66,7 +67,9 @@ export function typeOptions(schemas: TypeSchema[], current = ''): TypeOption[] {
   });
 
   const groups = [...byGroup.keys()].sort((a, b) => (a === CORE ? -1 : b === CORE ? 1 : a.localeCompare(b)));
-  const out: TypeOption[] = current && !listable.some((schema) => schema.id === current) ? [{ label: current, value: current }] : [];
+  // What is already picked but not offered - a type only another cluster has, typed in - stays an option
+  const out: TypeOption[] = [current].flat().filter((type) => type && !listable.some((schema) => schema.id === type))
+    .map((type) => ({ label: type, value: type }));
 
   groups.forEach((group) => {
     out.push({
@@ -77,3 +80,9 @@ export function typeOptions(schemas: TypeSchema[], current = ''): TypeOption[] {
 
   return out;
 }
+
+/**
+ * The type a Resource picker hands back: a picked entry is its type; one typed in is the text itself,
+ * which the shell's select hands back as a `{ label }` of its own making, with no value.
+ */
+export const typeOfOption = (option: Partial<TypeOption> | string): string => (typeof option === 'string' ? option : option.value ?? option.label ?? '');

@@ -37,7 +37,7 @@ export const entryLabel = (entry: CatalogEntry, t: (key: string) => string): str
 export const entryDesc = (entry: CatalogEntry, t: (key: string) => string): string => entry.desc ?? t(entry.descKey);
 
 /** The tiles for the widgets Liz wrote that an admin approved. */
-export function generatedEntries(widgets: { name: string; displayName: string; description: string }[], approvals: Record<string, string>): CatalogEntry[] {
+export function generatedEntries(widgets: { name: string; displayName: string; description: string }[], approvals: Record<string, unknown>): CatalogEntry[] {
   return widgets.filter((w) => approvals[w.name]).map((w) => ({
     id:       `generated:${ w.name }`,
     labelKey: '',

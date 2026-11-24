@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import { useRoute } from 'vue-router';
 import type { I18n } from '@shell/composables/useI18n';
@@ -212,31 +212,11 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
     syncActiveView();
     loaded.value = true;
-    keepFresh();
   }
 
-  // Views can arrive from elsewhere - Liz builds one into a ConfigMap of its own while the page is
-  // open - so the stored ones are read again now and then: only while the page is in view, and not
-  // during an edit, which works on its own draft.
-  const REFRESH_MS = 15000;
-  let refreshTimer: ReturnType<typeof setInterval> | null = null;
-
-  function keepFresh(): void {
-    if (refreshTimer) {
-      return;
-    }
-    refreshTimer = setInterval(() => {
-      if (!editing.value && !document.hidden) {
-        fetchTemplatingConfigMaps(store);
-      }
-    }, REFRESH_MS);
-  }
-
-  onBeforeUnmount(() => {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-    }
-  });
+  // Views also arrive from elsewhere - Liz builds one into a ConfigMap of its own while the page is
+  // open. Nothing here polls for them: the read above watches this package's ConfigMaps, and the
+  // management store fetches them again as soon as one is created, changed or deleted.
 
   // ---- writing ----
 

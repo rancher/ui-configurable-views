@@ -22,12 +22,12 @@ import SimpleBox from '@shell/components/SimpleBox.vue';
 import LabelValue from '@shell/components/LabelValue.vue';
 import Tag from '@shell/components/Tag.vue';
 import { NAME as EXPLORER } from '@shell/config/product/explorer';
-import { colorForState, stateDisplay } from '@shell/plugins/dashboard-store/resource-class';
+import { stateDisplay } from '@shell/plugins/dashboard-store/resource-class';
 import type { StateColor } from '@shell/utils/style';
 import WidgetCard from './WidgetCard.vue';
 import { useWidgetCluster, NO_CLUSTER } from '../../composables/useWidgetCluster';
 import { generatedWidgets, widgetApprovals } from '../../templating/template-engine';
-import { fetchClusterCounts, fetchStateSummaries } from '../../templating/widget-data';
+import { clusterGone, fetchClusterCounts, fetchStateSummaries, stateColorByName } from '../../templating/widget-data';
 import { countsFromSummaries } from '../../templating/status-cards';
 import { widgetHash } from '../../templating/widget-hash';
 import type { CompiledWidget } from '../../templating/widget-compiler';
@@ -76,7 +76,7 @@ const COMPONENTS: Record<GeneratedComponentName, Component> = {
 };
 
 const source = computed(() => generatedWidgets(store.getters).find((w) => w.name === props.widget.component) || null);
-const approved = computed(() => (props.widget.component ? widgetApprovals(store.getters)[props.widget.component] || '' : ''));
+const approved = computed(() => (props.widget.component ? widgetApprovals(store.getters)[props.widget.component]?.hash || '' : ''));
 
 type State = 'missing' | 'pending' | 'changed' | 'loading' | 'ready' | 'failed';
 
@@ -91,8 +91,9 @@ function dropStyles(): void {
 }
 
 // Compiled again whenever the source or its approval changes; never when they do not match. Watched
-// by the code itself, not the widget: the stored widgets are read again every few seconds, each read
-// a new object with the same code, which would compile it - and flash the spinner - every time.
+// by the code itself, not the widget: the stored widgets are read again whenever any of this package's
+// ConfigMaps changes, each read a new object with the same code, which would compile it - and flash
+// the spinner - every time.
 watch([() => source.value?.source ?? null, approved], async([code, approval]) => {
   const widget = code === null ? null : source.value;
 
@@ -142,6 +143,22 @@ onErrorCaptured((e) => {
   return false;
 });
 
+// A cluster removed from Rancher since the view was saved is said so, rather than handed to the code,
+// whose reads would each wait on that cluster's API for a long time and then fail.
+const gone = ref(false);
+
+watch(cluster, async(id) => {
+  gone.value = false;
+
+  if (id) {
+    const isGone = await clusterGone(store, id);
+
+    if (cluster.value === id) {
+      gone.value = isGone;
+    }
+  }
+}, { immediate: true });
+
 // ---- what the widget is given ----
 
 const clusterUrl = (path: string) => `/k8s/clusters/${ encodeURIComponent(cluster.value) }/v1/${ path }`;
@@ -175,11 +192,7 @@ const api = computed(() => ({
   },
 
   /** Rancher's colour for a state: success, info, warning, error or disabled. */
-  stateColor(state: string): StateColor {
-    const raw = colorForState(`${ state }`.toLowerCase(), false, false).replace('text-', '');
-
-    return (raw === 'darker' ? 'disabled' : raw) as StateColor;
-  },
+  stateColor: (state: string): StateColor => stateColorByName(state),
 
   /** A state as Rancher writes it ("CrashLoopBackOff", "Running"). */
   stateLabel: (state: string) => stateDisplay(state, true),
@@ -215,6 +228,9 @@ const api = computed(() => ({
 const message = computed(() => {
   if (!cluster.value && state.value === 'ready') {
     return t(NO_CLUSTER);
+  }
+  if (gone.value && state.value === 'ready') {
+    return t('configurableViews.errors.clusterGone', { cluster: cluster.value });
   }
 
   return state.value === 'ready' || state.value === 'loading' ? '' : t(`configurableViews.generated.${ state.value }`, { name: props.widget.component, error: error.value });

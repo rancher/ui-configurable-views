@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useStore } from 'vuex';
+import { useRoute } from 'vue-router';
 import { useI18n } from '@shell/composables/useI18n';
+import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
 import type { StateColor } from '@shell/utils/style';
 import { normalizeStatusCards, STATE_COLORS, type StatusCardsConfig } from '../../../templating/status-cards';
+import { typeOptions, typeOfOption } from '../../../templating/resource-types';
+import { pageClusterOf } from '../../../composables/useWidgetCluster';
+import { useTypeSchemas } from './useTypeSchemas';
 import type { WidgetSpec } from '../../../templating/types';
 
 // What a status widget counts, how it cuts it into cards and rows, and how it colours them.
@@ -13,6 +18,7 @@ const emit = defineEmits<{ update: [changes: Partial<WidgetSpec>] }>();
 
 const store = useStore();
 const { t } = useI18n(store);
+const route = useRoute();
 
 const status = computed<StatusCardsConfig>(() => normalizeStatusCards(props.widget.status));
 
@@ -33,13 +39,10 @@ const colors = setting('colors');
 const resources = setting('resources');
 const customColors = setting('customColors');
 
-// Typed as one line of types, comma-separated; none means every type.
-const resourcesText = computed({
-  get: () => resources.value.join(', '),
-  set: (value: string) => {
-    resources.value = `${ value }`.split(',').map((r) => r.trim()).filter(Boolean);
-  },
-});
+// The types it counts, picked from the cluster it counts - as a table's Resource is (see
+// useTypeSchemas) - or typed. None means every type.
+const { typeSchemas, loadingTypes } = useTypeSchemas(() => props.widget.cluster || pageClusterOf(route));
+const resourceOptions = computed(() => typeOptions(typeSchemas.value, resources.value));
 
 // One "status=color" per line; a line whose colour is not one of the state colours is left out.
 const customColorsText = computed({
@@ -67,12 +70,18 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
 
 <template>
   <label class="wsm__label">{{ t('configurableViews.widgetSettings.status.resources') }}</label>
-  <input
-    v-model.lazy="resourcesText"
-    class="wsm__field"
+  <LabeledSelect
+    v-model:value="resources"
+    class="status-settings__resources"
+    :options="resourceOptions"
+    :loading="loadingTypes"
+    :multiple="true"
+    :searchable="true"
+    :taggable="true"
+    :reduce="typeOfOption"
     :placeholder="t('configurableViews.widgetSettings.status.resourcesPlaceholder')"
     data-testid="configurable-views-status-resources"
-  >
+  />
   <p class="wsm__hint">
     {{ t('configurableViews.widgetSettings.status.resourcesHint') }}
   </p>
@@ -199,6 +208,11 @@ const STATUS_COLORS = ['state', 'none', 'custom'];
 </template>
 
 <style lang="scss" scoped>
+// The shell's searchable select, across the dialog like the fields around it
+.status-settings__resources {
+  width: 100%;
+}
+
 // Two settings side by side, where each is a short choice.
 .status-settings__pair {
   display:               grid;

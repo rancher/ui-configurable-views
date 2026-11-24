@@ -16,6 +16,11 @@ spec:
   authenticationType: RANCHER
   mcpURL: rancher-mcp-server.cattle-ai-agent-system.svc
   toolSet: rancher
+  # Code that will run in Rancher: the chat shows the ConfigMap - the widget's whole source - and waits
+  # for the person to confirm before saving it, as the stock rancher agent does for these tools.
+  humanValidationTools:
+    - createKubernetesResource
+    - patchKubernetesResource
   description: |
     Writes the CODE of a brand-new widget - a new kind of card, chart, list or table that the
     dashboard does not have yet ("a widget that shows each node's pods as a bar", "a card listing the
