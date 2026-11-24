@@ -167,6 +167,21 @@ configurableViews:
       state: By status
       type: By resource type
       namespace: By namespace
+  lizAgents:
+    title: Liz’s agents
+    intro: This package adds two agents to Liz, to build views and to write widgets. They are checked each time someone who can add them opens Rancher on a configurable page, and a copy in Rancher is only replaced by a newer one.
+    missing: Liz is not installed here, so she cannot build views or write widgets. Her agents are added once she is.
+    checking: Checking Liz’s agents…
+    again: Check again
+    phase: "Liz: {phase}"
+    state:
+      installed: Added
+      updated: Updated
+      current: Up to date
+      newer: A newer copy is kept
+      builtIn: Built into Liz
+      notAllowed: Not allowed to update it
+      failed: Could not be added
   generatedAdmin:
     title: Widgets written by Liz
     intro: Liz can write new widgets. Their code runs in Rancher for everyone who opens a page with them, with that person’s access, so each one stays off until someone who can approve reads its code and approves it. Approving covers the code exactly as it was read - if it changes, it stops until it is approved again.

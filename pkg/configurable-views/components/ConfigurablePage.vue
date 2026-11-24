@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  computed, onBeforeUnmount, ref, watch, type Component
+  computed, onBeforeUnmount, onMounted, ref, watch, type Component
 } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
@@ -14,6 +14,7 @@ import { usePageViews } from '../composables/usePageViews';
 import { useEditSession } from '../composables/useEditSession';
 import { useViewActions } from '../composables/useViewActions';
 import { useGridEditing } from '../composables/useGridEditing';
+import { ensureLizAgents } from '../templating/liz-agents';
 import type { PageKey } from '../templating/template-engine';
 
 // A configurable PAGE: the Home, or a cluster's dashboard. It holds that page's views, and one of
@@ -65,6 +66,10 @@ const props = defineProps<{
 const store = useStore();
 const { t } = useI18n(store);
 const confirm = useConfirm();
+
+// Liz's agents for this package, added or brought up to date once each time Rancher loads, by whoever may (see
+// liz-agents). In the background: the page never waits for it, and it never fails the page.
+onMounted(() => ensureLizAgents(store));
 
 const bar = ref<InstanceType<typeof ViewBar> | null>(null);
 const grid = ref<InstanceType<typeof WidgetGrid> | null>(null);
