@@ -167,6 +167,27 @@ configurableViews:
       state: By status
       type: By resource type
       namespace: By namespace
+  drafts:
+    label: Proposed by Liz
+    pill: Proposed
+    banner:
+      new: Liz proposed this view. Only those who can publish views see it until it is approved, and approving publishes it to everyone’s {page}.
+      change: "Liz proposed this as a change to “{target}”. Only those who can publish views see it until it is approved, and approving replaces that view for everyone."
+      targetGone: Liz proposed this as a change to one of her views, which is not there any more, so it can only be discarded.
+    approve:
+      title: Publish Liz’s view?
+      body: "“{name}” becomes a published view: everyone sees it on their {page}."
+      action: Approve
+    approveChange:
+      title: "Replace “{target}”?"
+      body: "“{target}” changes for everyone to what Liz proposed."
+    discard:
+      title: Discard Liz’s proposal?
+      body: "“{name}” is deleted, and nothing else changes."
+      action: Discard
+    error:
+      gone: This proposal is not there any more. It was approved or discarded elsewhere.
+      targetGone: The view this changes is not there any more.
   lizAgents:
     title: Liz’s agents
     intro: This package adds two agents to Liz, to build views and to write widgets. They are checked each time someone who can add them opens Rancher on a configurable page, and a copy in Rancher is only replaced by a newer one.

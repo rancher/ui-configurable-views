@@ -36,6 +36,8 @@ const LABEL_TYPE = 'templates.rancher.io/type';
 const TYPE_CONFIG = 'config';
 /** A view in a ConfigMap of its own - what Liz writes when asked to build a page (see generatedViews). */
 const TYPE_VIEW = 'view';
+/** A view Liz proposed, waiting for someone who may publish it (see generatedDrafts). */
+const TYPE_DRAFT = 'view-draft';
 /** A widget Liz wrote the code of - a new kind of widget (see generatedWidgets). */
 const TYPE_WIDGET = 'widget';
 
@@ -60,6 +62,8 @@ export const PAGE_VIEWS = 'views';
 interface ConfigMapModel {
   metadata: { name: string; labels?: Record<string, string> };
   data?: Record<string, string>;
+  /** Whether the person signed in may change it - from the links Rancher sends with it. */
+  canUpdate?: boolean;
   save(): Promise<unknown>;
 }
 
@@ -83,6 +87,8 @@ export interface ViewScopes {
    * own (see generatedViews). Never part of `global`, so nothing written back to it copies them.
    */
   generated: View[];
+  /** Views Liz proposed, for those who may publish them (see generatedDrafts). */
+  drafts: View[];
 }
 
 // ---- reading ----------------------------------------------------------------------------------------
@@ -156,6 +162,7 @@ export function appliedViewScopes(getters: Getters, page: PageKey = PAGE_HOME): 
     hasGlobal: !!rawGlobal,
     hasUser:   !!rawUser,
     generated: generatedViews(getters, page),
+    drafts:    generatedDrafts(getters, page),
   };
 }
 
@@ -175,27 +182,128 @@ export const isGeneratedView = (id: string | null | undefined): boolean => !!id?
  * is normalized exactly as a stored view is, and shown as published - removing it from everyone
  * deletes its ConfigMap (see deleteGeneratedView).
  */
-function viewMaps(getters: Getters, page: PageKey): ConfigMapModel[] {
+function viewMaps(getters: Getters, page: PageKey, type = TYPE_VIEW): ConfigMapModel[] {
   return (getters['management/all']?.(CONFIG_MAP) || [])
     .filter((cm: ConfigMapModel & { metadata: { namespace?: string } }) => cm.metadata?.labels?.[LABEL_MARKER] === 'true' &&
-      cm.metadata?.labels?.[LABEL_TYPE] === TYPE_VIEW && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE) &&
+      cm.metadata?.labels?.[LABEL_TYPE] === type && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE) &&
       (cm.data?.page || PAGE_HOME) === page);
+}
+
+/** A ConfigMap's view, read as a stored view is, under the id given */
+function viewOf(cm: ConfigMapModel, id: string): View | null {
+  const raw = parse(cm.data?.view) as Record<string, unknown>;
+  const [view] = migratePageViews({
+    views: [{
+      ...raw, id, widgets: withStableIds(raw.widgets, id)
+    }]
+  }).views;
+
+  return view || null;
 }
 
 export function generatedViews(getters: Getters, page: PageKey = PAGE_HOME): View[] {
   return viewMaps(getters, page)
     .flatMap((cm) => {
-      const raw = parse(cm.data?.view) as Record<string, unknown>;
-      const id = `${ GENERATED_VIEW_PREFIX }${ cm.metadata.name }`;
-      const [view] = migratePageViews({
-        views: [{
-          ...raw, id, widgets: withStableIds(raw.widgets, id)
-        }]
-      }).views;
+      const view = viewOf(cm, `${ GENERATED_VIEW_PREFIX }${ cm.metadata.name }`);
 
       return view ? [view] : [];
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---- views Liz proposed ---------------------------------------------------------------------------
+
+/** The id of a view Liz proposed: its ConfigMap's name, as for her published views. */
+export const DRAFT_VIEW_PREFIX = 'draft:';
+
+export const isDraftView = (id: string | null | undefined): boolean => !!id?.startsWith(DRAFT_VIEW_PREFIX);
+
+/**
+ * What Liz proposed for a page, before anyone has approved it: ConfigMaps of type `view-draft`, each a
+ * view as her published ones are, and, for a change to one of them, `data.replaces` - the name of its
+ * ConfigMap. Shown only to those who may change the draft's ConfigMap, who are the ones who may
+ * publish a view; anyone else never sees one.
+ *
+ * Approving a new view makes the draft a published view where it is (see approveDraft); approving a
+ * change writes it into the view it replaces. Discarding deletes the draft.
+ */
+export function generatedDrafts(getters: Getters, page: PageKey = PAGE_HOME): View[] {
+  return viewMaps(getters, page, TYPE_DRAFT)
+    .filter((cm) => cm.canUpdate !== false)
+    .flatMap((cm) => {
+      const view = viewOf(cm, `${ DRAFT_VIEW_PREFIX }${ cm.metadata.name }`);
+      const replaces = cm.data?.replaces || '';
+
+      return view ? [{ ...view, draft: replaces ? { replaces, replacesName: viewNamed(getters, replaces) } : {} }] : [];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The name of the published view in a ConfigMap of Liz's - what a change to it is shown against */
+function viewNamed(getters: Getters, cmName: string): string {
+  const cm = cmNamed(getters, cmName);
+
+  if (!cm || cm.metadata.labels?.[LABEL_TYPE] !== TYPE_VIEW) {
+    return '';
+  }
+
+  return viewOf(cm, cmName)?.name || cmName;
+}
+
+/** Why a draft could not be approved: it is gone, or the view it changes is. */
+export class DraftError extends Error {
+  constructor(public readonly reason: 'gone' | 'targetGone') {
+    super(reason);
+  }
+}
+
+/**
+ * Publish what Liz proposed. A new view: its ConfigMap becomes a published view, as one written by Liz
+ * before drafts. A change: the view it replaces takes the draft's, and the draft goes. Resolves to the
+ * id of the published view, to open it.
+ */
+export async function approveDraft(store: VuexStore, id: string): Promise<string> {
+  const name = id.slice(DRAFT_VIEW_PREFIX.length);
+  const draft = cmNamed(store.getters, name) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (!draft || draft.metadata.labels?.[LABEL_TYPE] !== TYPE_DRAFT) {
+    throw new DraftError('gone');
+  }
+
+  const replaces = draft.data?.replaces;
+
+  if (replaces) {
+    const target = cmNamed(store.getters, replaces);
+
+    if (!target || target.metadata.labels?.[LABEL_TYPE] !== TYPE_VIEW) {
+      throw new DraftError('targetGone');
+    }
+
+    // On a copy, so a write that fails leaves the published view - and the draft - as they were
+    const copy: ConfigMapModel = await store.dispatch('management/clone', { resource: target });
+
+    copy.data = { ...(copy.data || {}), view: draft.data?.view || '' };
+    await copy.save();
+    await draft.remove();
+
+    return `${ GENERATED_VIEW_PREFIX }${ replaces }`;
+  }
+
+  const copy: ConfigMapModel = await store.dispatch('management/clone', { resource: draft });
+
+  copy.metadata.labels = { ...(copy.metadata.labels || {}), [LABEL_TYPE]: TYPE_VIEW };
+  await copy.save();
+
+  return `${ GENERATED_VIEW_PREFIX }${ name }`;
+}
+
+/** Throw away what Liz proposed: its ConfigMap goes. */
+export async function discardDraft(store: VuexStore, id: string): Promise<void> {
+  const draft = cmNamed(store.getters, id.slice(DRAFT_VIEW_PREFIX.length)) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (draft && draft.metadata.labels?.[LABEL_TYPE] === TYPE_DRAFT) {
+    await draft.remove();
+  }
 }
 
 /**

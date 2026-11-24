@@ -2,7 +2,7 @@ import type { Ref } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
 import {
-  saveView, fetchTemplatingConfigMaps, deleteGeneratedView, isGeneratedView, type PageKey
+  saveView, fetchTemplatingConfigMaps, deleteGeneratedView, isGeneratedView, approveDraft, discardDraft, DraftError, type PageKey
 } from '../templating/template-engine';
 import {
   newId, newLayoutView, isStockView, BUILT_IN_STOCK_ID, orderKeyOf
@@ -313,6 +313,77 @@ export function useViewActions(
     });
   }
 
+  // ---- what Liz proposed ----
+
+  /**
+   * Publish what Liz proposed: a new view for everyone, or her change to one of her views. Everyone's
+   * from then on, so it asks first, as publishing does. The published view opens.
+   */
+  async function approveDraftView(id: string): Promise<void> {
+    const view = pageViews.viewById(id);
+
+    if (!view?.draft) {
+      return;
+    }
+
+    // The title names the view too ("Replace “Platform”?"), so both get the same values
+    const kind = view.draft.replaces ? 'approveChange' : 'approve';
+    const values = {
+      name: view.name, target: view.draft.replacesName || view.name, page: props.title
+    };
+
+    if (!await confirm({
+      title:  t(`configurableViews.drafts.${ kind }.title`, values),
+      body:   t(`configurableViews.drafts.${ kind }.body`, values, true),
+      action: t('configurableViews.drafts.approve.action'),
+    })) {
+      return;
+    }
+
+    saving.value = true;
+    error.value = '';
+
+    try {
+      const published = await approveDraft(store, id);
+
+      await fetchTemplatingConfigMaps(store);
+      pageViews.setActiveView(published);
+    } catch (e) {
+      error.value = e instanceof DraftError ? t(`configurableViews.drafts.error.${ e.reason }`) : (e as Error)?.message || String(e);
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  /** Throw away what Liz proposed. Nothing else changes, so it only asks because it cannot be undone. */
+  async function discardDraftView(id: string): Promise<void> {
+    const view = pageViews.viewById(id);
+
+    if (!view?.draft || !await confirm({
+      title:  t('configurableViews.drafts.discard.title'),
+      body:   t('configurableViews.drafts.discard.body', { name: view.name }, true),
+      action: t('configurableViews.drafts.discard.action'),
+      danger: true,
+    })) {
+      return;
+    }
+
+    saving.value = true;
+    error.value = '';
+
+    try {
+      await discardDraft(store, id);
+      await fetchTemplatingConfigMaps(store);
+      activeViewId.value = null;
+      pinnedView.value = false;
+      pageViews.syncActiveView();
+    } catch (e) {
+      error.value = (e as Error)?.message || String(e);
+    } finally {
+      saving.value = false;
+    }
+  }
+
   return {
     renameStoredView,
     duplicateView,
@@ -321,5 +392,7 @@ export function useViewActions(
     publishView,
     unpublishView,
     deleteView,
+    approveDraftView,
+    discardDraftView,
   };
 }

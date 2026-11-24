@@ -229,7 +229,7 @@ describe('liz-agents', () => {
     // A change to an agent's spec needs a higher revision, or a copy already in Rancher is never
     // replaced. Change the spec, raise the revision in the file, then record both here.
     const RECORDED: Record<string, { revision: number; sha256: string }> = {
-      'views-builder':  { revision: 1, sha256: '5b3da36f0e5dc61aa7f0cb32bd1da22fe8a13a546d3498f612bf190e34a428b6' },
+      'views-builder':  { revision: 2, sha256: 'ec3019fcafefe54927011dc87feb9c9f418814802d31438d7721bc5a62c66d66' },
       'widget-builder': { revision: 1, sha256: 'a2149de31870e90947651004dd6a69016678b231aaf605d442a43898479a0d98' },
     };
 

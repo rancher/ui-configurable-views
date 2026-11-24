@@ -144,6 +144,15 @@ export interface WidgetNode extends NodeBox {
 }
 
 /**
+ * On a view Liz proposed and nobody approved yet (see generatedDrafts): for a change to one of her
+ * views, the ConfigMap it replaces and that view's name. Never stored - it says where the view came from.
+ */
+export interface DraftInfo {
+  replaces?: string;
+  replacesName?: string;
+}
+
+/**
  * A VIEW: one named arrangement of a page's widgets, and a tab in the bar when the page has more
  * than one.
  *
@@ -163,6 +172,8 @@ export interface LayoutView {
   org?: boolean;
   /** The published view this one was forked from. */
   from?: string;
+  /** Liz proposed it, and it waits for approval. */
+  draft?: DraftInfo;
 }
 
 /** Rancher's own page - the Home, a cluster's dashboard - kept as a view. No grid, nothing to lay out. */
@@ -172,6 +183,7 @@ export interface StockView {
   kind: 'stock';
   org?: boolean;
   from?: string;
+  draft?: DraftInfo;
 }
 
 export type View = LayoutView | StockView;

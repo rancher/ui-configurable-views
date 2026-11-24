@@ -1,7 +1,7 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  appliedViewScopes, canApproveWidgets, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView, setWidgetApproval,
-  toggleTemplating, viewsOffInUrl, widgetApprovals
+  appliedViewScopes, approveDraft, canApproveWidgets, discardDraft, DraftError, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView,
+  setWidgetApproval, toggleTemplating, viewsOffInUrl, widgetApprovals
 } from '@pkg/configurable-views/templating/template-engine';
 import { PREF_ENABLED, PREF_VIEWS } from '@pkg/configurable-views/templating/user-prefs';
 import type { PageViews } from '@pkg/configurable-views/templating/types';
@@ -253,6 +253,114 @@ describe('views built by Liz', () => {
     const { store } = storeWith([{ ...lizView('liz-bad', 'home', {}), data: { page: 'home', view: '{not json' } }]);
 
     expect(generatedViews(store.getters, 'home').map((v) => v.id)).toStrictEqual(['cm:liz-bad']);
+  });
+});
+
+describe('views Liz proposed', () => {
+  type Model = FakeConfigMap & { canUpdate?: boolean };
+
+  // The ConfigMaps as the management store holds them: models that can be removed and say whether the
+  // person signed in may change them. `clone` hands back a copy to change and save, as the store does.
+  function draftStore(maps: Model[]) {
+    const removed: string[] = [];
+    const saved: FakeConfigMap[] = [];
+    const models = maps.map((m) => ({
+      ...m,
+      remove: jest.fn(() => {
+        removed.push(m.metadata.name);
+
+        return Promise.resolve();
+      }),
+    }));
+    const getters = {
+      'management/byId': (_type: string, id: string) => models.find((m) => `${ m.metadata.namespace }/${ m.metadata.name }` === id),
+      'management/all':  () => models,
+      'prefs/get':       () => null,
+    };
+    const dispatch = jest.fn((action: string, spec: { resource: FakeConfigMap }) => {
+      if (action !== 'management/clone') {
+        return Promise.reject(new Error(action));
+      }
+      const copy = JSON.parse(JSON.stringify(spec.resource));
+
+      copy.save = jest.fn(() => {
+        saved.push(JSON.parse(JSON.stringify(copy)));
+
+        return Promise.resolve();
+      });
+
+      return Promise.resolve(copy);
+    });
+
+    return {
+      store: { getters, dispatch } as unknown as VuexStore, removed, saved
+    };
+  }
+
+  const proposal = (name: string, view: unknown, extra: Record<string, string> = {}): Model => configMap(name, {
+    page: 'home', view, ...extra
+  }, 'view-draft');
+  const published = (name: string, view: unknown): Model => configMap(name, { page: 'home', view }, 'view');
+  const platform = published('liz-view-platform', { name: 'Platform', widgets: [] });
+  const change = proposal('liz-view-platform-change', { name: 'Platform', widgets: [{ type: 'widget', widget: { kind: 'statusCards' } }] }, { replaces: 'liz-view-platform' });
+
+  it('shows a proposal only to who may change it, apart from the published views', () => {
+    const { store } = draftStore([
+      proposal('liz-view-new', { name: 'New', widgets: [] }),
+      { ...proposal('liz-view-hidden', { name: 'Hidden', widgets: [] }), canUpdate: false },
+      platform,
+      change,
+    ]);
+    const scopes = appliedViewScopes(store.getters, 'home');
+
+    expect(scopes.drafts.map((v) => [v.id, v.draft])).toStrictEqual([
+      ['draft:liz-view-new', {}],
+      ['draft:liz-view-platform-change', { replaces: 'liz-view-platform', replacesName: 'Platform' }],
+    ]);
+    expect(scopes.generated.map((v) => v.id)).toStrictEqual(['cm:liz-view-platform']);
+    expect(appliedViewScopes(store.getters, 'clusterDashboard').drafts).toStrictEqual([]);
+  });
+
+  it('says when the view a change replaces is not there any more', () => {
+    const { store } = draftStore([change]);
+
+    expect(appliedViewScopes(store.getters, 'home').drafts[0].draft).toStrictEqual({ replaces: 'liz-view-platform', replacesName: '' });
+  });
+
+  it('publishes a new view where it is, and opens it by the id a published view of Liz\'s has', async() => {
+    const { store, saved, removed } = draftStore([proposal('liz-view-new', { name: 'New', widgets: [] })]);
+
+    expect(await approveDraft(store, 'draft:liz-view-new')).toBe('cm:liz-view-new');
+    expect(saved.map((cm) => [cm.metadata.name, cm.metadata.labels['templates.rancher.io/type']])).toStrictEqual([['liz-view-new', 'view']]);
+    expect(removed).toStrictEqual([]);
+  });
+
+  it('writes a change into the view it replaces, then removes the proposal', async() => {
+    const { store, saved, removed } = draftStore([platform, change]);
+
+    expect(await approveDraft(store, 'draft:liz-view-platform-change')).toBe('cm:liz-view-platform');
+    expect(saved.map((cm) => [cm.metadata.name, cm.metadata.labels['templates.rancher.io/type'], cm.data.view])).toStrictEqual([
+      ['liz-view-platform', 'view', change.data.view],
+    ]);
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
+  });
+
+  it('refuses a proposal that is gone, and a change to a view that is gone, writing nothing', async() => {
+    const gone = draftStore([]);
+    const targetGone = draftStore([change]);
+
+    await expect(approveDraft(gone.store, 'draft:liz-view-new')).rejects.toStrictEqual(new DraftError('gone'));
+    await expect(approveDraft(targetGone.store, 'draft:liz-view-platform-change')).rejects.toStrictEqual(new DraftError('targetGone'));
+    expect([...gone.saved, ...targetGone.saved, ...targetGone.removed]).toStrictEqual([]);
+  });
+
+  it('throws a proposal away, and never a published view by mistake', async() => {
+    const { store, removed } = draftStore([platform, change]);
+
+    await discardDraft(store, 'draft:liz-view-platform-change');
+    await discardDraft(store, 'draft:liz-view-platform');
+
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
   });
 });
 

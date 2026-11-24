@@ -1,9 +1,9 @@
 import { computed, ref, watch } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { I18n } from '@shell/composables/useI18n';
 import {
-  isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, type PageKey
+  isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, DRAFT_VIEW_PREFIX, GENERATED_VIEW_PREFIX, type PageKey
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
 import {
@@ -119,6 +119,10 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), defaultViewId.value);
   });
 
+  // What Liz proposed for this page, for those who may publish it (see generatedDrafts): tabs of their
+  // own after the views, never ordered, edited or made the default. Out of the way while editing.
+  const drafts = computed<View[]>(() => (editing.value ? [] : scopes.value.drafts));
+
   /** The tabs showing a published view, or your copy of one. */
   const publishedIds = computed(() => views.value.filter((p) => p.org || (p.from && orgIds.value.has(p.from))).map((p) => p.id));
 
@@ -129,7 +133,13 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     return views.value.filter((p) => !p.org && p.from && published.has(p.from) && published.get(p.from) !== viewContent(p)).map((p) => p.id);
   });
 
-  const activeView = computed(() => views.value.find((p) => p.id === activeViewId.value) || views.value[0] || null);
+  /** A view of the bar, or a draft: anything that can be open */
+  const findView = (id: string | null): View | undefined => (id ? views.value.find((p) => p.id === id) || drafts.value.find((p) => p.id === id) : undefined);
+
+  const activeView = computed(() => findView(activeViewId.value) || views.value[0] || null);
+
+  /** The open view, when it is one Liz proposed */
+  const activeDraft = computed(() => (activeView.value?.draft ? activeView.value : null));
 
   const isNewView = computed(() => !!newViewId.value && newViewId.value === activeViewId.value);
 
@@ -144,7 +154,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
   // True when the draft differs from the last saved state.
   const dirty = computed(() => editing.value && savedBaseline.value !== null && JSON.stringify(working.value) !== savedBaseline.value);
 
-  const viewById = (id: string): View | null => views.value.find((p) => p.id === id) || null;
+  const viewById = (id: string): View | null => findView(id) || null;
 
   /** The view being edited, as it is in the draft. */
   function workingView(): View | null {
@@ -169,7 +179,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
    * never moved underneath you.
    */
   function syncActiveView(): void {
-    if (pinnedView.value && views.value.find((p) => p.id === activeViewId.value)) {
+    if (pinnedView.value && findView(activeViewId.value)) {
       return;
     }
 
@@ -201,6 +211,32 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
       syncActiveView();
     }
   });
+
+  // A link to one view: `?view=<id>` opens it - what Liz links to when she has built one. Once it is open
+  // the query goes, so the tabs work as always and a reload opens the page as it would. A draft approved
+  // since keeps its name, so a link to it opens the published view. Waits for the views to arrive, as a
+  // new one may still be on its way to the store.
+  const router = useRouter();
+
+  watch([() => route?.query?.view, views, drafts], ([wanted]) => {
+    if (typeof wanted !== 'string' || !wanted || editing.value) {
+      return;
+    }
+
+    const published = wanted.startsWith(DRAFT_VIEW_PREFIX) ? `${ GENERATED_VIEW_PREFIX }${ wanted.slice(DRAFT_VIEW_PREFIX.length) }` : '';
+    const id = [wanted, published].find((candidate) => candidate && findView(candidate));
+
+    if (!id) {
+      return;
+    }
+
+    setActiveView(id);
+
+    const query = { ...route.query };
+
+    delete query.view;
+    router?.replace({ query })?.catch?.(() => {});
+  }, { immediate: true });
 
   /**
    * What is published, read once; the person's own views are already here, with their preferences.
@@ -283,9 +319,11 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     userDraft,
     defaultViewId,
     views,
+    drafts,
     publishedIds,
     changedIds,
     activeView,
+    activeDraft,
     isNewView,
     activeIsStock,
     widgets,

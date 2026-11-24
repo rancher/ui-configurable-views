@@ -4,6 +4,7 @@ import {
 } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
+import { Banner } from '@components/Banner';
 import WidgetGrid from './WidgetGrid.vue';
 import ViewBar from './ViewBar.vue';
 import EditViewSidebar from './EditViewSidebar.vue';
@@ -77,7 +78,7 @@ const grid = ref<InstanceType<typeof WidgetGrid> | null>(null);
 const pageViews = usePageViews(props, store, t);
 const {
   loaded, editing, activeViewId, selectedNodeId, startedFrom, settingsAnchor, saving, drawerOpen, error,
-  templatingEnabled, defaultViewId, views, publishedIds, changedIds, activeView, isNewView, activeIsStock, widgets, gap, dirty,
+  templatingEnabled, defaultViewId, views, drafts, publishedIds, changedIds, activeView, activeDraft, isNewView, activeIsStock, widgets, gap, dirty,
 } = pageViews;
 
 const {
@@ -85,8 +86,12 @@ const {
 } = useEditSession(pageViews, props, store, t, confirm);
 
 const {
-  renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView,
+  renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView, approveDraftView, discardDraftView,
 } = useViewActions(pageViews, props, store, t, confirm, bar, leaveEdit);
+
+// A change Liz proposed to a view of hers that is gone since: there is nothing left to replace, so it
+// can only be thrown away.
+const draftTargetGone = computed(() => !!activeDraft.value?.draft?.replaces && !activeDraft.value.draft.replacesName);
 
 const {
   selectedNode, settingsNode, flash, surfaceStyle, addFromCatalog, onCatalogDragStart, onCatalogDragEnd,
@@ -111,7 +116,8 @@ function dropOnPage(ev: DragEvent): void {
   }
 }
 
-const hasContent = computed(() => activeIsStock.value || widgets.value.length > 0);
+// A proposal is always shown as one, even an empty one: its banner is the way to approve or discard it
+const hasContent = computed(() => activeIsStock.value || widgets.value.length > 0 || !!activeDraft.value);
 
 /**
  * True when what is on screen is the stock page - and then it is rendered exactly as Rancher renders it.
@@ -131,6 +137,7 @@ const showsStockPage = computed(() => loaded.value && !editing.value && (activeI
 // The bar renders in both layouts, so what it is given is written once.
 const barProps = computed(() => ({
   views:        views.value,
+  drafts:       drafts.value,
   activeId:     activeViewId.value,
   editing:      editing.value,
   isNew:        isNewView.value,
@@ -229,6 +236,39 @@ const barListeners = {
     >
       {{ error }}
     </p>
+
+    <!-- What Liz proposed, shown as it would be, with the way to publish it or throw it away -->
+    <Banner
+      v-if="activeDraft && !editing"
+      class="ai-home__draft"
+      :color="draftTargetGone ? 'warning' : 'info'"
+      data-testid="configurable-views-draft-banner"
+    >
+      <div class="ai-home__draft-body">
+        <span v-if="draftTargetGone">{{ t('configurableViews.drafts.banner.targetGone') }}</span>
+        <span v-else-if="activeDraft.draft?.replaces">{{ t('configurableViews.drafts.banner.change', { target: activeDraft.draft.replacesName }) }}</span>
+        <span v-else>{{ t('configurableViews.drafts.banner.new', { page: title }) }}</span>
+        <span class="ai-home__draft-actions">
+          <button
+            v-if="!draftTargetGone"
+            class="btn btn-sm role-primary"
+            :disabled="saving"
+            data-testid="configurable-views-draft-approve"
+            @click="approveDraftView(activeDraft.id)"
+          >
+            {{ t('configurableViews.drafts.approve.action') }}
+          </button>
+          <button
+            class="btn btn-sm role-secondary"
+            :disabled="saving"
+            data-testid="configurable-views-draft-discard"
+            @click="discardDraftView(activeDraft.id)"
+          >
+            {{ t('configurableViews.drafts.discard.action') }}
+          </button>
+        </span>
+      </div>
+    </Banner>
 
     <!-- While editing the page splits: the view keeps the full width it will really have, and every
        control lives in the drawer beside it. -->
@@ -369,6 +409,24 @@ const barListeners = {
     color:     var(--error);
     font-size: 13px;
     margin:    8px 20px 0;
+  }
+
+  &__draft {
+    margin: 12px 20px 0;
+  }
+
+  &__draft-body {
+    align-items:     center;
+    display:         flex;
+    flex-wrap:       wrap;
+    gap:             12px;
+    justify-content: space-between;
+    width:           100%;
+  }
+
+  &__draft-actions {
+    display: flex;
+    gap:     8px;
   }
 }
 </style>

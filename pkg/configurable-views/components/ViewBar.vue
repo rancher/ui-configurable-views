@@ -77,7 +77,10 @@ const props = withDefaults(defineProps<{
   drawerOpen?: boolean;
   /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll). */
   page?: string;
+  /** What Liz proposed, waiting for approval: tabs of their own after the views, with no menu. */
+  drafts?: View[];
 }>(), {
+  drafts:       () => [],
   views:        () => [],
   activeId:     '',
   editing:      false,
@@ -138,7 +141,8 @@ let tabScrollFrame = 0;
 
 const shortcuts = computed(() => ({ duplicate: shortcutLabel([isMac ? '⌘' : 'Ctrl', 'D']) }));
 
-const activeView = computed(() => props.views.find((v) => v.id === props.activeId) || null);
+// A proposal of Liz's can be the open one too: a link to it opens it (see usePageViews)
+const activeView = computed(() => props.views.find((v) => v.id === props.activeId) || props.drafts.find((v) => v.id === props.activeId) || null);
 
 // "Changes are saved to your account only." — unless this view IS the organization template, in
 // which case saving it changes what everyone sees, and the bar must say so.
@@ -496,6 +500,16 @@ onMounted(() => {
   });
 });
 
+// A proposal opened from a link, with the bar already there: its tab is at the end of the strip, so
+// bring it into sight. Views are opened by their tabs, which are in sight already.
+watch(() => props.activeId, (id) => {
+  const draft = props.drafts.find((view) => view.id === id);
+
+  if (draft) {
+    nextTick(() => tabButton(draft)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+  }
+});
+
 onBeforeUnmount(() => {
   viewBarScroll[props.page] = tabStrip.value?.scrollLeft || 0;
   window.removeEventListener('keydown', onShortcut);
@@ -710,6 +724,36 @@ defineExpose({ openRename, focusTab });
           </rc-dropdown>
         </div>
       </TransitionGroup>
+
+      <!-- What Liz proposed: a group of its own after the views, as none of them is ordered, edited or
+         made the default. Approve and Discard are on the page, above the proposal. -->
+      <div
+        v-if="drafts.length"
+        class="vbar__list vbar__drafts"
+        role="tablist"
+        :aria-label="t('configurableViews.drafts.label')"
+      >
+        <div
+          v-for="view in drafts"
+          :key="view.id"
+          class="vbar__slot"
+          :class="{ 'vbar__slot--active': view.id === activeId }"
+          :data-testid="`configurable-views-draft-${ view.id }`"
+        >
+          <rc-button
+            :ref="(el) => keepTabButton(view.id, el as ComponentPublicInstance | null)"
+            variant="ghost"
+            size="small"
+            role="tab"
+            class="vbar__view"
+            :aria-selected="view.id === activeId"
+            @click="$emit('select', view.id)"
+          >
+            <span class="vbar__proposed">{{ t('configurableViews.drafts.pill') }}</span>
+            {{ view.name }}
+          </rc-button>
+        </div>
+      </div>
 
       <!-- Sticky at the end of the strip: the scroll shadow over the tabs passing under it, gone at the end -->
       <span
@@ -1024,6 +1068,20 @@ $tab-height: 30px;
     right:         -3px;
     top:           -2px;
     width:         6px;
+  }
+
+  // What Liz proposed: a group apart from the views, each tab marked as a proposal
+  &__drafts {
+    margin-left: 8px;
+  }
+
+  &__proposed {
+    border:        1px solid currentColor;
+    border-radius: var(--border-radius);
+    font-size:     11px;
+    line-height:   16px;
+    margin-right:  6px;
+    padding:       0 4px;
   }
 
   // The active view's name, edited where the tab was.
