@@ -6,6 +6,7 @@ import {
   isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, type PageKey
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
+import { shareRancherState } from '../templating/shell-state';
 import {
   DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews
 } from '../templating/view-model';
@@ -203,9 +204,12 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
    * What is published, read once; the person's own views are already here, with their preferences.
    * Nothing stored and no access to it are the same answer: Rancher's own page, straight away. A read
    * that failed is read again on the next visit.
+   *
+   * Nothing is drawn before the shell's copy in the package knows the Rancher it runs in, either (see
+   * shell-state): its banner and links read that as they are drawn, and not again.
    */
   async function load(): Promise<void> {
-    await fetchTemplatingConfigMaps(store);
+    await Promise.all([fetchTemplatingConfigMaps(store), shareRancherState(store)]);
 
     syncActiveView();
     loaded.value = true;

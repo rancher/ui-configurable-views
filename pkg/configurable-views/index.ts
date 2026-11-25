@@ -10,6 +10,7 @@ import ClusterDashboard from './pages/ClusterDashboard.vue';
 import { toggleViewBar, viewBarLocked, viewBarVisible } from './composables/useViewBarVisibility';
 import { forgetClusterStores } from './composables/useClusterStore';
 import { pagedStores } from './templating/table-paging';
+import { keepStockPages, unmarkStockRoutes, type RouteSource } from './templating/stock-pages';
 
 /** What a header action runs with as `this`: the header, with the store and the shell API on it. */
 interface HeaderContext {
@@ -37,8 +38,14 @@ const toggleViews: Action = {
   },
 };
 
+/** What the shell hands an extension as it starts it, beside the plugin: the parts read here. */
+interface InitContext {
+  app?: { router?: RouteSource };
+  store?: { $router?: RouteSource };
+}
+
 /** Init the package */
-export default function(plugin: IPlugin): void {
+export default function(plugin: IPlugin, context?: InitContext): void {
   importTypes(plugin);
 
   plugin.metadata = require('./package.json');
@@ -58,13 +65,17 @@ export default function(plugin: IPlugin): void {
   // The Home, under the home layout. A cluster's dashboard, as the child of the layout it already
   // lives in ('default') - same name, same path, so the stock route is replaced and every link to a
   // cluster's dashboard lands here. Registered at init, so they are in place before the first page
-  // resolves. Neither page leaves Rancher's own behind: each can show it, as one of its views.
+  // resolves. Neither page leaves Rancher's own behind: each can show it, as one of its views - the
+  // page as the running Rancher has it, kept from its router before these routes replace it (see
+  // stock-pages). And the routes stay Rancher's, not marked as the package's.
+  keepStockPages(context?.app?.router || context?.store?.$router);
   plugin.setHomePage(Home);
   plugin.addRoute('default', {
     name:      'c-cluster-explorer',
     path:      '/c/:cluster/explorer',
     component: ClusterDashboard,
   });
+  unmarkStockRoutes(plugin);
 
   // The view bar is hidden until asked for: a header button on each configurable page shows and
   // hides it, and Shift + V does the same - V for views, Shift and a letter as the shell's own page

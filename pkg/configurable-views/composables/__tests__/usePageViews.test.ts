@@ -2,6 +2,8 @@ import type { VuexStore } from '@shell/types/store/vuex';
 import { usePageViews } from '@pkg/configurable-views/composables/usePageViews';
 
 jest.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }));
+// What the shell's copy is told of Rancher is its own module's; here it only answers
+jest.mock('@pkg/configurable-views/templating/shell-state', () => ({ shareRancherState: () => Promise.resolve() }));
 
 const READ = 'management/findLabelSelector';
 
