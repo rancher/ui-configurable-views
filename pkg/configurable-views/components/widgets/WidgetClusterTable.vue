@@ -5,6 +5,7 @@ import { useI18n } from '@shell/composables/useI18n';
 import PaginatedResourceTable from '@shell/components/PaginatedResourceTable.vue';
 import ClusterRowPin from '@shell/components/ClusterRowPin.vue';
 import { RcButton } from '@components/RcButton';
+import type { ButtonVariant } from '@components/RcButton/types';
 import { BadgeState } from '@components/BadgeState';
 import { STATE, CLUSTER_BADGE, MGMT_CLUSTER_PROVIDER, MGMT_CLUSTER_KUBE_VERSION } from '@shell/config/table-headers';
 import { STEVE_MGMT_STATE_COL, STEVE_NAME_COL, STEVE_MGMT_CLUSTER_PROVIDER, STEVE_MGMT_CLUSTER_KUBE_VERSION } from '@shell/config/pagination-table-headers';
@@ -14,6 +15,8 @@ import { MODE, _IMPORT } from '@shell/config/query-params';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
 import { parseSi, formatSi, createMemoryFormat } from '@shell/utils/units';
 import ManagementClusterUtils from '@shell/list/utils/management.cattle.io.cluster.utils';
+import { isConfigurableTablesEnabled } from '@shell/utils/table-views/feature';
+import { clusterPinnedQueryFields } from '@shell/utils/table-views/query-fields';
 import type MgmtCluster from '@shell/models/management.cattle.io.cluster';
 import type { PaginationArgs } from '@shell/types/store/pagination.types';
 import type { PagTableFetchPageSecondaryResourcesOpts, PagTableFetchSecondaryResourcesOpts } from '@shell/types/components/paginatedResourceTable';
@@ -29,6 +32,11 @@ import type { WidgetSpec } from '../../templating/types';
 // Nothing about it is configurable but the heading. Its columns, its sorting and its buttons belong
 // to the Home, and reproducing them through the generic Table's column pickers would be a worse
 // copy of something we can simply use.
+//
+// With Rancher's table views on, it is the Home's table views list: the query box, the View menu and
+// the Home's own saved views (`table-views-page="home"`), shared with the stock Home's cluster list,
+// and the Home's buttons in their order for it. The table is the shell's copy built into the package,
+// which the shell keeps as written unless it asks, so it asks.
 //
 // It PAGES, through the stock Home's own paginated path, built from the shell's pieces rather than
 // copies of them:
@@ -65,6 +73,9 @@ const mgmtClusterSchema = store.getters['management/schemaFor'](MANAGEMENT.CLUST
 
 const title = computed(() => props.widget.title || t('landing.clusters.title'));
 
+// Rancher's table views, as the Home reads the switch: they change the buttons and the heading too.
+const configurableTables = isConfigurableTablesEnabled(store);
+
 // The count beside the heading, as the Home shows it: the count the store has kept, else the total
 // of the page the table last asked for.
 const clusterCount = ref(0);
@@ -90,6 +101,33 @@ const createLocation = {
 const importLocation = { ...createLocation, query: { [MODE]: _IMPORT } };
 
 const canCreateCluster = !!provClusterSchema?.collectionMethods?.find((x: string) => x.toLowerCase() === 'post');
+
+// The Home's buttons, in its order: with table views, Create and Import Existing first and Manage the
+// primary one; without, Manage first and the other two primary.
+const clusterActions = computed(() => {
+  const create = {
+    key: 'create', to: createLocation, label: t('generic.create'), shown: canCreateCluster
+  };
+  const importExisting = {
+    key: 'import', to: importLocation, label: t('cluster.importAction'), shown: canCreateCluster
+  };
+  const manage = {
+    key: 'manage', to: manageLocation, label: t('cluster.manageAction'), shown: !!provClusterSchema
+  };
+  const ordered = configurableTables ? [create, importExisting, manage] : [manage, importExisting, create];
+  const variants: Record<string, ButtonVariant> = configurableTables ? {
+    create: 'secondary', import: 'secondary', manage: 'primary'
+  } : {
+    manage: 'secondary', import: 'primary', create: 'primary'
+  };
+
+  return ordered.filter((action) => action.shown).map((action) => ({ ...action, variant: variants[action.key] }));
+});
+
+// `pinned:true` / `pinned:false` in the query box: the rows are management clusters, as the pins are.
+const pinnedQueryFields = computed(() => clusterPinnedQueryFields(store, t, {
+  idPath: 'id', serverPath: 'metadata.name', total: clusterCountDisplay.value
+}));
 
 const cpuHeader = {
   label: t('tableHeaders.cpu'), value: '', name: 'cpu', sort: ['status.allocatable.cpuRaw'], search: ['status.allocatable.cpuRaw']
@@ -149,12 +187,37 @@ const paginationHeaders = [
 
 const filterRowsLocal = (rows: MgmtCluster[]) => ManagementClusterUtils.filterRowsLocal(rows, { $store: store });
 const filterRowsApi = (pagination: PaginationArgs) => ManagementClusterUtils.filterRowsApi(pagination, { $store: store });
-const fetchSecondaryResources = (opts: PagTableFetchSecondaryResourcesOpts) => Promise.all(ManagementClusterUtils.fetchSecondaryResources(opts, { $store: store }));
+
+// For the bar in the Machines column, which only table views has. Not awaited, as on the Home: the
+// column shows a count until they land.
+function fetchMachineStates(): void {
+  if (!configurableTables) {
+    return;
+  }
+  if (store.getters['management/canList'](CAPI.MACHINE_DEPLOYMENT)) {
+    store.dispatch('management/findAll', { type: CAPI.MACHINE_DEPLOYMENT });
+  }
+  if (store.getters['management/canList'](MANAGEMENT.NODE_POOL)) {
+    store.dispatch('management/findAll', { type: MANAGEMENT.NODE_POOL });
+  }
+}
+
+function fetchSecondaryResources(opts: PagTableFetchSecondaryResourcesOpts) {
+  const promises = ManagementClusterUtils.fetchSecondaryResources(opts, { $store: store });
+
+  fetchMachineStates();
+
+  return Promise.all(promises);
+}
 
 async function fetchPageSecondaryResources(opts: PagTableFetchPageSecondaryResourcesOpts): Promise<void> {
   clusterCount.value = !opts.canPaginate || !opts.page?.length ? 0 : opts.pagResult.count;
 
-  await Promise.all(await ManagementClusterUtils.fetchPageSecondaryResources(opts, { $store: store }));
+  const promises = await ManagementClusterUtils.fetchPageSecondaryResources(opts, { $store: store });
+
+  fetchMachineStates();
+
+  await Promise.all(promises);
 }
 
 function cpuAllocatable(cluster: MgmtClusterRow): number {
@@ -176,6 +239,10 @@ onBeforeUnmount(() => ManagementClusterUtils.forgetSecondaryResources({ context:
   <PaginatedResourceTable
     v-if="mgmtClusterSchema"
     :schema="mgmtClusterSchema"
+    :class="{ 'configurable-tables': configurableTables }"
+    :table-views="true"
+    table-views-page="home"
+    :query-fields="pinnedQueryFields"
     override-in-store="management"
     :headers="headers"
     :pagination-headers="paginationHeaders"
@@ -197,7 +264,7 @@ onBeforeUnmount(() => ManagementClusterUtils.forgetSecondaryResources({ context:
           {{ title }}
         </h1>
         <BadgeState
-          v-if="clusterCountDisplay"
+          v-if="clusterCountDisplay && !configurableTables"
           :label="clusterCountDisplay.toString()"
           color="bg-info ml-20 mr-20"
         />
@@ -208,25 +275,15 @@ onBeforeUnmount(() => ManagementClusterUtils.forgetSecondaryResources({ context:
       v-if="canCreateCluster || !!provClusterSchema"
       #header-middle
     >
-      <div class="table-heading">
+      <div :class="['table-heading', { 'cluster-actions': configurableTables }]">
         <RcButton
-          v-if="!!provClusterSchema"
-          variant="secondary"
-          :to="manageLocation"
+          v-for="action in clusterActions"
+          :key="action.key"
+          :variant="action.variant"
+          :to="action.to"
+          :aria-label="action.label"
         >
-          {{ t('cluster.manageAction') }}
-        </RcButton>
-        <RcButton
-          v-if="canCreateCluster"
-          :to="importLocation"
-        >
-          {{ t('cluster.importAction') }}
-        </RcButton>
-        <RcButton
-          v-if="canCreateCluster"
-          :to="createLocation"
-        >
-          {{ t('generic.create') }}
+          {{ action.label }}
         </RcButton>
       </div>
     </template>
@@ -321,9 +378,19 @@ onBeforeUnmount(() => ManagementClusterUtils.forgetSecondaryResources({ context:
   gap:         10px;
 }
 
-// The Home's heading row: 39px tall, the count sitting beside the title.
+// The Home's heading row: 39px tall, the count sitting beside the title; 32px with table views.
 .row.table-heading {
   gap:    0;
   height: 39px;
+}
+
+.configurable-tables .table-heading {
+  height: 32px;
+}
+
+// With table views the buttons sit at the end, 16px apart.
+.cluster-actions {
+  gap:             16px;
+  justify-content: flex-end;
 }
 </style>
