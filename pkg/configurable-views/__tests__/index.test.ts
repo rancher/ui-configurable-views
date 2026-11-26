@@ -72,6 +72,47 @@ describe('extension: configurable-views', () => {
     expect(mockForget).toHaveBeenCalledWith(store);
   });
 
+  it("keeps Rancher's own pages before replacing them, and leaves the routes that replace them Rancher's", async() => {
+    // The package as Rancher loads it: nothing kept yet
+    jest.resetModules();
+    const { default: init } = await import('@pkg/configurable-views/index');
+    const { stockPage } = await import('@pkg/configurable-views/templating/stock-pages');
+    const rancherHome = { name: 'RancherHome', props: {} };
+    const router = {
+      getRoutes: () => [{
+        name: 'home', meta: {}, components: { default: rancherHome }
+      }]
+    };
+    // The shell's own: every route added is marked as the package's, and kept until it is loaded
+    const plugin = {
+      name:   'configurable-views',
+      routes: [] as { parent?: string, route: { name?: string, meta?: Record<string, unknown> } }[],
+      addRoute(parent: string, route: { name?: string, meta?: Record<string, unknown> }) {
+        route.meta = { ...route.meta, pkg: this.name };
+        this.routes.push({ parent, route });
+      },
+      setHomePage(component: unknown) {
+        this.addRoute('home-layout', {
+          name: 'home', path: '/home', component
+        } as { name: string });
+      },
+      addProduct:                 jest.fn(),
+      addNavHooks:                jest.fn(),
+      addUninstallHook:           jest.fn(),
+      addAction:                  jest.fn(),
+      enableServerSidePagination: jest.fn(),
+      metadata:                   {},
+    };
+
+    init(plugin as unknown as Parameters<typeof init>[0], { app: { router } });
+
+    expect(stockPage('home', { name: 'TheCopy' })).toBe(rancherHome);
+    expect(plugin.routes.map(({ parent, route }) => [parent, route.name, route.meta])).toStrictEqual([
+      ['home-layout', 'home', {}],
+      ['default', 'c-cluster-explorer', {}],
+    ]);
+  });
+
   it("has the server page a widget's table wherever the type's own list is paged", async() => {
     const plugin = await initialize();
 
