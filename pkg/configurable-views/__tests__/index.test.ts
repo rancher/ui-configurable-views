@@ -73,8 +73,10 @@ describe('extension: configurable-views', () => {
   });
 
   it("keeps Rancher's own pages before replacing them, and leaves the routes that replace them Rancher's", async() => {
+    // The package as Rancher loads it: nothing kept yet
+    jest.resetModules();
     const { default: init } = await import('@pkg/configurable-views/index');
-    const { stockPage, resetStockPages } = await import('@pkg/configurable-views/templating/stock-pages');
+    const { stockPage } = await import('@pkg/configurable-views/templating/stock-pages');
     const rancherHome = { name: 'RancherHome', props: {} };
     const router = {
       getRoutes: () => [{
@@ -109,7 +111,6 @@ describe('extension: configurable-views', () => {
       ['home-layout', 'home', {}],
       ['default', 'c-cluster-explorer', {}],
     ]);
-    resetStockPages();
   });
 
   it("has the server page a widget's table wherever the type's own list is paged", async() => {

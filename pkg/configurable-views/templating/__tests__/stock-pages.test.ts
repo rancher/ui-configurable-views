@@ -1,9 +1,21 @@
 import { defineComponent, type Component } from 'vue';
-import {
-  keepStockPages, resetStockPages, stockPage, unmarkStockRoutes, STOCK_ROUTES
-} from '@pkg/configurable-views/templating/stock-pages';
+
+type StockPages = typeof import('@pkg/configurable-views/templating/stock-pages');
 
 describe('stock pages', () => {
+  // The module as the package starts it, in each test: nothing kept yet
+  let keepStockPages: StockPages['keepStockPages'];
+  let stockPage: StockPages['stockPage'];
+  let unmarkStockRoutes: StockPages['unmarkStockRoutes'];
+  let STOCK_ROUTES: StockPages['STOCK_ROUTES'];
+
+  beforeEach(async() => {
+    jest.resetModules();
+    ({
+      keepStockPages, stockPage, unmarkStockRoutes, STOCK_ROUTES
+    } = await import('@pkg/configurable-views/templating/stock-pages'));
+  });
+
   const builtWith = defineComponent({ name: 'TheCopyThePackageWasBuiltWith' });
   const rancherHome = defineComponent({ name: 'RancherHome' });
   const rancherDashboard = defineComponent({ name: 'RancherClusterDashboard' });
@@ -14,8 +26,6 @@ describe('stock pages', () => {
       name, meta, components: { default: component as Component }
     })),
   });
-
-  afterEach(() => resetStockPages());
 
   it("keeps Rancher's own Home and cluster dashboard from its router", () => {
     keepStockPages(routerWith(

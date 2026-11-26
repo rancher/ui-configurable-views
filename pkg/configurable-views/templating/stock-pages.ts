@@ -71,11 +71,6 @@ export function stockPage(name: StockRoute, builtWith: Component): Component {
   return kept[name] || builtWith;
 }
 
-/** Forgets the pages kept, for tests. */
-export function resetStockPages(): void {
-  STOCK_ROUTES.forEach((name) => delete kept[name]);
-}
-
 /** What the package needs of a plugin's routes: the shell's Plugin keeps every route added to it. */
 interface PluginRoutes {
   routes?: { route: { name?: unknown, meta?: Record<string, unknown> } }[];
