@@ -9,7 +9,8 @@ import Tab from '@shell/components/Tabbed/Tab.vue';
 import { RcButton } from '@components/RcButton';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
 import {
-  appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig, type PageKey
+  appliedViewScopes, fetchTemplatingConfigMaps, generatedViews, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig,
+  type PageKey
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
 import { cssSize, isStockView, normalizeSides } from '../templating/view-model';
@@ -33,6 +34,8 @@ interface Section {
   key: string;
   label: string;
   set: PageViews;
+  /** The view your default names, by its id or your copy's: a default can name a published view */
+  yourDefault: string;
 }
 
 const store = useStore();
@@ -77,19 +80,38 @@ onMounted(async() => {
   loaded.value = true;
 });
 
+/**
+ * The name of your default when it is a view Liz built that you have no copy of: those are not listed
+ * here, so the page says it in words.
+ */
+function lizDefault(page: PageKey): string {
+  const scopes = appliedViewScopes(store.getters, page);
+  const named = scopes.user?.defaultViewId || '';
+  const listed = [...(scopes.global?.views || []), ...(scopes.user?.views || [])];
+
+  if (!named || listed.some((p) => p.id === named || p.from === named)) {
+    return '';
+  }
+
+  return generatedViews(store.getters, page).find((p) => p.id === named)?.name || '';
+}
+
 /** The scopes that have views for a page: the organization's, then yours. */
 function sectionsFor(page: PageKey): Section[] {
   const scopes = appliedViewScopes(store.getters, page);
   const out: Section[] = [];
+  // Your default, on your copy of the view it names when you have one, else on the published view itself
+  const named = scopes.user?.defaultViewId || '';
+  const yourDefault = scopes.user?.views.find((p) => p.id === named || (named && p.from === named))?.id || named;
 
   if (scopes.global?.views.length) {
     out.push({
-      key: 'global', label: t('configurableViews.savedViews.organization'), set: scopes.global
+      key: 'global', label: t('configurableViews.savedViews.organization'), set: scopes.global, yourDefault
     });
   }
   if (scopes.user?.views.length) {
     out.push({
-      key: 'user', label: t('configurableViews.savedViews.yours'), set: scopes.user
+      key: 'user', label: t('configurableViews.savedViews.yours'), set: scopes.user, yourDefault
     });
   }
 
@@ -173,7 +195,6 @@ async function saveYaml(): Promise<void> {
 
   try {
     await savePageConfig(store, parsed, page);
-    await fetchTemplatingConfigMaps(store);
     yamlStatus.value = t('configurableViews.savedViews.saved');
     yamlPage.value = null;
   } catch (e) {
@@ -265,6 +286,14 @@ async function saveYaml(): Promise<void> {
           class="text-muted"
         />
 
+        <p
+          v-if="loaded && lizDefault(page.key) && yamlPage !== page.key"
+          class="text-muted"
+          data-testid="saved-views-liz-default"
+        >
+          {{ t('configurableViews.savedViews.lizDefault', { name: lizDefault(page.key) }) }}
+        </p>
+
         <div
           v-for="sec in sectionsFor(page.key)"
           :key="sec.key"
@@ -285,9 +314,13 @@ async function saveYaml(): Promise<void> {
                 <span class="saved-views__tab-name">{{ view.name }}</span>
                 <span class="saved-views__tags">
                   <span
-                    v-if="sec.set.defaultViewId === view.id"
+                    v-if="sec.key === 'user' ? sec.yourDefault === view.id : sec.set.defaultViewId === view.id"
                     class="saved-views__kind"
                   >{{ t('configurableViews.savedViews.default') }}</span>
+                  <span
+                    v-if="sec.key === 'global' && sec.yourDefault === view.id"
+                    class="saved-views__kind"
+                  >{{ t('configurableViews.savedViews.yourDefault') }}</span>
                   <span
                     v-if="isStock(view)"
                     class="text-muted"

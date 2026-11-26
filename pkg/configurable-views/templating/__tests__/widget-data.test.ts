@@ -2,8 +2,8 @@ import type { VuexStore } from '@shell/types/store/vuex';
 import { PaginationParamFilter, type PaginationArgs } from '@shell/types/store/pagination.types';
 import { paginationFilterClusters } from '@shell/utils/cluster';
 import {
-  allClusterOptions, clusterOption, columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterSchemas, fetchMetricsBoards,
-  fetchMonitoring, fetchStateSummaries, hasMonitoringApps, objectRoute, pageOfClusters, summarizeCounts
+  allClusterOptions, clusterGone, clusterOption, columnsLinkingTo, expectedAgents, fetchAlerts, fetchClusterCounts, fetchClusterSchemas, fetchMetricsBoards,
+  fetchMonitoring, fetchStateSummaries, hasMonitoringApps, objectRoute, pageOfClusters, stateColorByName, summarizeCounts
 } from '@pkg/configurable-views/templating/widget-data';
 
 // A store whose management/request answers by the PATH asked for (query aside): a value, or an
@@ -434,5 +434,40 @@ describe('reading a named cluster', () => {
 
     expect(await fetchAlerts(storeAnswering({ '/api/v2/alerts': [alert] }).store, 'c-m-1')).toStrictEqual([alert]);
     expect(await fetchAlerts(storeAnswering({ '/api/v1/alerts': { data: [alert] } }).store, 'c-m-1')).toStrictEqual([alert]);
+  });
+});
+
+describe('a cluster removed from Rancher', () => {
+  const storeFinding = (outcome: unknown) => ({ dispatch: jest.fn(() => (outcome instanceof Error || (outcome && typeof outcome === 'object' && 'reject' in outcome) ? Promise.reject((outcome as { reject?: unknown }).reject ?? outcome) : Promise.resolve(outcome))) } as unknown as VuexStore);
+
+  it('is gone when Rancher answers that it has no such cluster', async() => {
+    // How the store rejects: the answer's body, with its status alongside
+    const notFound = Object.defineProperty({ code: 'NotFound', status: 404 }, '_status', { value: 404 });
+
+    expect(await clusterGone(storeFinding({ reject: notFound }), 'c-m-gone')).toBe(true);
+    expect(await clusterGone(storeFinding({ reject: { code: 'NotFound' } }), 'c-m-gone')).toBe(true);
+  });
+
+  it('is not gone when Rancher has it, or when the answer is anything but "not found"', async() => {
+    expect(await clusterGone(storeFinding({ id: 'c-m-1' }), 'c-m-1')).toBe(false);
+    expect(await clusterGone(storeFinding({ reject: Object.defineProperty({}, '_status', { value: 503 }) }), 'c-m-1')).toBe(false);
+    expect(await clusterGone(storeFinding(new Error('network')), 'c-m-1')).toBe(false);
+  });
+
+  it('asks the cluster\'s own record, which answers at once', async() => {
+    const store = storeFinding({ id: 'c-m-1' });
+
+    await clusterGone(store, 'c-m-1');
+
+    expect(store.dispatch).toHaveBeenCalledWith('management/find', { type: 'management.cattle.io.cluster', id: 'c-m-1' });
+  });
+});
+
+describe('stateColorByName', () => {
+  it('colours a state by its name, as Rancher does, the darker grey as disabled', () => {
+    expect(stateColorByName('Error')).toBe('error');
+    expect(stateColorByName('active')).toBe('success');
+    expect(stateColorByName('in-progress')).toBe('info');
+    expect(stateColorByName('off')).toBe('disabled');
   });
 });

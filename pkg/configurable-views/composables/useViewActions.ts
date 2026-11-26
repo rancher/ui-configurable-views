@@ -1,12 +1,14 @@
 import type { Ref } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
-import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
+import {
+  saveView, deleteGeneratedView, isGeneratedView, approveDraft, discardDraft, DraftError, type PageKey
+} from '../templating/template-engine';
 import {
   newId, newLayoutView, isStockView, BUILT_IN_STOCK_ID, orderKeyOf
 } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
-import { clone, type PageViewsState } from './usePageViews';
+import { clone, contentHash, copyOf, type PageViewsState } from './usePageViews';
 import type { ConfirmOptions } from './useConfirm';
 import type { View, PageViews } from '../templating/types';
 
@@ -34,7 +36,7 @@ export function useViewActions(
   leaveEdit: () => Promise<void>,
 ) {
   const {
-    editing, activeViewId, pinnedView, saving, error, scopes, orgIds, views,
+    editing, working, savedBaseline, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
   } = pageViews;
 
   /** Renamed in place on its tab. */
@@ -75,6 +77,7 @@ export function useViewActions(
 
     delete copy.org;
     delete copy.from;
+    delete copy.fromHash;
     draft.views.push(copy);
 
     await pageViews.persist(draft, copy.id);
@@ -82,7 +85,11 @@ export function useViewActions(
     bar.value?.openRename(copy.id);
   }
 
-  /** Your default is the view the page opens on. Picking Rancher's own page is how to go back to none. */
+  /**
+   * Your default is the view the page opens on. Picking Rancher's own page is how to go back to none.
+   * A published view is not copied for it: your default names the published view, so it keeps following
+   * it - and your copy of it, while you have one, stands in for it.
+   */
   async function setDefaultView(id: string): Promise<void> {
     const view = pageViews.viewById(id);
 
@@ -91,18 +98,31 @@ export function useViewActions(
     }
 
     const draft = pageViews.userDraft();
+    const named = view.id === BUILT_IN_STOCK_ID ? undefined : (view.from && orgIds.value.has(view.from) ? view.from : view.id);
+    const setDefault = (set: PageViews | null): void => {
+      if (!set) {
+        return;
+      }
+      if (named) {
+        set.defaultViewId = named;
+      } else {
+        delete set.defaultViewId;
+      }
+    };
 
-    if (view.id === BUILT_IN_STOCK_ID) {
-      delete draft.defaultViewId;
-      await pageViews.persist(draft, activeViewId.value);
+    // While editing, the draft being edited is what Save writes: it takes the default too. So does what
+    // the editor counts as saved, as the default is saved now - it is not a change for Cancel to discard.
+    setDefault(draft);
+    if (editing.value) {
+      setDefault(working.value);
+      if (savedBaseline.value !== null) {
+        const baseline = JSON.parse(savedBaseline.value) as PageViews;
 
-      return;
+        setDefault(baseline);
+        savedBaseline.value = JSON.stringify(baseline);
+      }
     }
-
-    const ownId = pageViews.ownCopy(draft, view);
-
-    draft.defaultViewId = ownId;
-    await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
+    await pageViews.persist(draft, activeViewId.value);
   }
 
   /** The order the tabs were dragged into, by the key each view keeps its place by. */
@@ -114,13 +134,15 @@ export function useViewActions(
   }
 
   /**
-   * After publishing, YOUR copy becomes a fork of the view you just published.
+   * After publishing, YOUR copy becomes a fork of the view you just published, and remembers what it
+   * showed - your copy's own content, now everyone's - so it follows that view from now on.
    *
    * Without this the bar would show the same view twice — once as yours, once as the organization's —
-   * which is not two views, it is one view and its shadow.
+   * which is not two views, it is one view and its shadow. And a copy whose changes were just published
+   * would still remember the view as it was before, and take the publish for someone else's change.
    */
   async function linkToPublished(source: View, publishedId: string): Promise<void> {
-    if (source.org || source.from === publishedId) {
+    if (source.org || (source.from === publishedId && source.fromHash === contentHash(source))) {
       return;
     }
 
@@ -129,6 +151,7 @@ export function useViewActions(
 
       if (view) {
         view.from = publishedId;
+        view.fromHash = contentHash(view);
       }
 
       return;
@@ -139,6 +162,7 @@ export function useViewActions(
 
     if (draft && mine) {
       mine.from = publishedId;
+      mine.fromHash = contentHash(mine);
       await saveView(store, 'user', draft, props.page);
     }
   }
@@ -150,9 +174,14 @@ export function useViewActions(
   async function publishView(id: string): Promise<void> {
     const source = editing.value && id === activeViewId.value ? pageViews.workingView() : pageViews.viewById(id);
 
+    // A copy whose published view changed since it was made would put those changes back as they were.
+    // One made before copies remembered their source cannot tell: it may have.
+    const outdatedCopy = !!source && outdatedIds.value.includes(source.id);
+    const body = outdatedCopy ? (source?.fromHash ? 'bodyOutdated' : 'bodyDiffers') : 'body';
+
     if (!source || isStockView(source) || !await confirm({
       title:  t('configurableViews.page.publish.title'),
-      body:   t('configurableViews.page.publish.body', { name: source.name, page: props.title }, true),
+      body:   t(`configurableViews.page.publish.${ body }`, { name: source.name, page: props.title }, true),
       action: t('configurableViews.page.publish.action'),
     })) {
       return;
@@ -163,6 +192,7 @@ export function useViewActions(
 
     delete published.org;
     delete published.from;
+    delete published.fromHash;
 
     const at = org.views.findIndex((p) => p.id === published.id || p.name === published.name);
 
@@ -178,7 +208,6 @@ export function useViewActions(
     try {
       await saveView(store, 'global', org, props.page);
       await linkToPublished(source, published.id);
-      await fetchTemplatingConfigMaps(store);
     } catch (e) {
       error.value = (e as Error)?.message || String(e);
     } finally {
@@ -212,11 +241,19 @@ export function useViewActions(
     error.value = '';
 
     try {
-      const org: PageViews = scopes.value.global ? clone(scopes.value.global) : { views: [] };
+      // The organization's own copy goes - and, for a view Liz built, its ConfigMap too: a published copy of
+      // it stands in for it under the same id, so removing only the copy would bring Liz's original back.
+      const global = scopes.value.global;
 
-      org.views = org.views.filter((p) => p.id !== orgId);
-      await saveView(store, 'global', org.views.length ? org : null, props.page);
-      await fetchTemplatingConfigMaps(store);
+      if (global?.views.some((p) => p.id === orgId)) {
+        const org: PageViews = clone(global);
+
+        org.views = org.views.filter((p) => p.id !== orgId);
+        await saveView(store, 'global', org.views.length ? org : null, props.page);
+      }
+      if (isGeneratedView(orgId)) {
+        await deleteGeneratedView(store, orgId);
+      }
 
       if (view.org) {
         activeViewId.value = null;
@@ -302,7 +339,141 @@ export function useViewActions(
     });
   }
 
+  // ---- what Liz proposed ----
+
+  /**
+   * Publish what Liz proposed: a new view for everyone, or her change to one of her views. Everyone's
+   * from then on, so it asks first, as publishing does. The published view opens.
+   */
+  async function approveDraftView(id: string): Promise<void> {
+    const view = pageViews.viewById(id);
+
+    if (!view?.draft) {
+      return;
+    }
+
+    // The title names the view too ("Replace “Platform”?"), so both get the same values
+    const kind = view.draft.replaces ? 'approveChange' : 'approve';
+    const values = {
+      name: view.name, target: view.draft.replacesName || view.name, page: props.title
+    };
+
+    if (!await confirm({
+      title:  t(`configurableViews.drafts.${ kind }.title`, values),
+      body:   t(`configurableViews.drafts.${ kind }.body`, values, true),
+      action: t('configurableViews.drafts.approve.action'),
+    })) {
+      return;
+    }
+
+    saving.value = true;
+    error.value = '';
+
+    try {
+      const published = await approveDraft(store, id);
+
+      pageViews.settleDraft(view);
+      pageViews.setActiveView(published);
+    } catch (e) {
+      error.value = e instanceof DraftError ? t(`configurableViews.drafts.error.${ e.reason }`) : (e as Error)?.message || String(e);
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  /** Throw away what Liz proposed. Nothing else changes, so it only asks because it cannot be undone. */
+  async function discardDraftView(id: string): Promise<void> {
+    const view = pageViews.viewById(id);
+
+    if (!view?.draft || !await confirm({
+      title:  t('configurableViews.drafts.discard.title'),
+      body:   t('configurableViews.drafts.discard.body', { name: view.name }, true),
+      action: t('configurableViews.drafts.discard.action'),
+      danger: true,
+    })) {
+      return;
+    }
+
+    saving.value = true;
+    error.value = '';
+
+    try {
+      await discardDraft(store, id);
+      pageViews.settleDraft(view);
+      activeViewId.value = null;
+      pinnedView.value = false;
+      pageViews.syncActiveView();
+    } catch (e) {
+      error.value = (e as Error)?.message || String(e);
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  // ---- your copy, when the published view changed under it ----
+
+  /** Your copy and the published view it came from, when it is one of yours that is out of date. */
+  function outdated(id: string): { draft: PageViews, mine: View, source: View } | null {
+    const draft = pageViews.userDraft();
+    const mine = draft.views.find((p) => p.id === id);
+    const source = mine?.from ? orgViews.value.find((p) => p.id === mine.from) : undefined;
+
+    return mine && source && outdatedIds.value.includes(id) ? {
+      draft, mine, source
+    } : null;
+  }
+
+  /**
+   * Take the published view: your copy shows it again, and follows it from now on. Same tab, same place.
+   * Your changes to the copy go at once and are offered back for a while, as a deleted view is.
+   */
+  async function takePublishedView(id: string): Promise<void> {
+    const found = outdated(id);
+
+    if (!found) {
+      return;
+    }
+
+    const { draft, mine, source } = found;
+    const yours = clone(mine);
+
+    draft.views.splice(draft.views.indexOf(mine), 1, copyOf(source, mine.id));
+    await pageViews.persist(draft, activeViewId.value);
+
+    store.dispatch('growl/success', {
+      title:   t('configurableViews.outdated.taken'),
+      message: t('configurableViews.outdated.takenMessage', { name: yours.name }, true),
+      timeout: UNDO_TIMEOUT,
+      action:  {
+        label: t('configurableViews.bar.undo'),
+        run:   async() => {
+          const now = pageViews.userDraft();
+          const at = now.views.findIndex((p) => p.id === yours.id);
+
+          if (at >= 0) {
+            now.views.splice(at, 1, yours);
+            await pageViews.persist(now, activeViewId.value);
+          }
+        },
+      },
+    });
+  }
+
+  /** Keep your copy: it is yours, as it is, and publishing it is publishing your changes. */
+  async function keepOwnCopy(id: string): Promise<void> {
+    const found = outdated(id);
+
+    if (!found) {
+      return;
+    }
+
+    found.mine.fromHash = contentHash(found.source);
+    await pageViews.persist(found.draft, activeViewId.value);
+  }
+
   return {
+    takePublishedView,
+    keepOwnCopy,
     renameStoredView,
     duplicateView,
     setDefaultView,
@@ -310,5 +481,7 @@ export function useViewActions(
     publishView,
     unpublishView,
     deleteView,
+    approveDraftView,
+    discardDraftView,
   };
 }

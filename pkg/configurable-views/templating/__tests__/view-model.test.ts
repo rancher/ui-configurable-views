@@ -52,8 +52,8 @@ describe('migratePageViews', () => {
     expect(set.views.map((v) => v.id)).toStrictEqual(['new']);
   });
 
-  it('drops a default that names a view which is not there', () => {
-    expect(migratePageViews({ views: [{ id: 'v1' }], defaultViewId: 'gone' }).defaultViewId).toBeUndefined();
+  it('keeps a default that names none of its own views: it can name a published view', () => {
+    expect(migratePageViews({ views: [{ id: 'v1' }], defaultViewId: 'cm:liz-view-platform' }).defaultViewId).toBe('cm:liz-view-platform');
   });
 
   it('keeps a stock view as a stock view, with no widgets', () => {

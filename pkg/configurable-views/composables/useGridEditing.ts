@@ -10,7 +10,7 @@ import {
 import {
   dropWidget, liftWidget, moveWidgetToCell, resizeWidget, resizeWidgetStart, type DropTarget
 } from '../templating/grid-layout';
-import type { CatalogEntry } from '../templating/widget-catalog';
+import { entryLabel, type CatalogEntry } from '../templating/widget-catalog';
 import type { PageViewsState } from './usePageViews';
 import type { WidgetNode, WidgetPlace, WidgetSpec } from '../templating/types';
 
@@ -111,11 +111,13 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
       return;
     }
 
-    // A Tabs widget's first tabs are named in the reader's language - the names are then the view's own.
-    const spec = entry.spec.tabs ? {
-      ...entry.spec,
-      tabs: entry.spec.tabs.map((tab, i) => ({ ...tab, name: t('configurableViews.widgetSettings.newTab', { index: i + 1 }) })),
-    } : entry.spec;
+    // A ready-made widget's title, and a Tabs widget's first tabs, are named in the reader's language -
+    // the names are then the view's own.
+    const titled = entry.titleKey ? { ...entry.spec, title: t(entry.titleKey) } : entry.spec;
+    const spec = titled.tabs ? {
+      ...titled,
+      tabs: titled.tabs.map((tab, i) => ({ ...tab, name: t('configurableViews.widgetSettings.newTab', { index: i + 1 }) })),
+    } : titled;
     const node = newWidgetNode(spec, { colSpan: entry.span });
 
     mutate((list) => (target ? dropWidget(list, node, target, place) : insertWidget(list, node)));
@@ -124,7 +126,7 @@ export function useGridEditing(pageViews: PageViewsState, t: I18n['t']) {
 
   function onCatalogDragStart(entry: CatalogEntry, ev: DragEvent): void {
     ui.dragEntry = entry;
-    ui.dragLabel = t(entry.labelKey);
+    ui.dragLabel = entryLabel(entry, t);
     ui.dragKind = entry.spec.kind;
     ui.dragSpan = entry.span;
     ui.dragGrab = null;

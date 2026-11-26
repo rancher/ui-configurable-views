@@ -1,6 +1,7 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
-  appliedViewScopes, getPageConfig, isTemplatingEnabled, saveView, toggleTemplating, viewsOffInUrl
+  appliedViewScopes, approveDraft, canApproveWidgets, discardDraft, DraftError, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView,
+  setWidgetApproval, toggleTemplating, viewsOffInUrl, widgetApprovals, fetchWidgetChanges
 } from '@pkg/configurable-views/templating/template-engine';
 import { PREF_ENABLED, PREF_VIEWS } from '@pkg/configurable-views/templating/user-prefs';
 import type { PageViews } from '@pkg/configurable-views/templating/types';
@@ -189,3 +190,347 @@ describe('saveView', () => {
     expect(created[0].save).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('views built by Liz', () => {
+  const lizView = (name: string, page: string, view: unknown) => configMap(name, { page, view }, 'view');
+
+  it('reads each view from a ConfigMap of its own, for its page, as a stored view is read', () => {
+    const { store } = storeWith([
+      lizView('liz-pods', 'home', {
+        name:    'Pods',
+        widgets: [{
+          type: 'widget', widget: { kind: 'statusCards' }, colSpan: 6
+        }]
+      }),
+      lizView('liz-cd', 'clusterDashboard', { name: 'Cluster', widgets: [] }),
+      configMap('templating-home', { home: { global: { views: [] } } }),
+    ]);
+    const views = generatedViews(store.getters, 'home');
+
+    expect(views.map((v) => [v.id, v.name])).toStrictEqual([['cm:liz-pods', 'Pods']]);
+    expect((views[0] as { widgets: { colSpan: number }[] }).widgets[0].colSpan).toBe(6);
+    expect(generatedViews(store.getters, 'clusterDashboard').map((v) => v.id)).toStrictEqual(['cm:liz-cd']);
+  });
+
+  it('gives their widgets the same ids every time they are read, so the page does not draw them again', () => {
+    const { store } = storeWith([lizView('liz-x', 'home', {
+      name:    'X',
+      widgets: [
+        { type: 'widget', widget: { kind: 'statusCards' } },
+        { type: 'widget', widget: { kind: 'tabs', tabs: [{ name: 'A', widgets: [{ type: 'widget', widget: { kind: 'banner' } }] }] } },
+      ],
+    })]);
+    const ids = () => {
+      const [view] = generatedViews(store.getters, 'home') as { widgets: { id: string, widget: { tabs?: { id: string, widgets: { id: string }[] }[] } }[] }[];
+
+      return [view.widgets.map((w) => w.id), view.widgets[1].widget.tabs?.[0].id, view.widgets[1].widget.tabs?.[0].widgets[0].id];
+    };
+
+    expect(ids()).toStrictEqual([['cm:liz-x-w0', 'cm:liz-x-w1'], 'cm:liz-x-w1-t0', 'cm:liz-x-w1-t0-w0']);
+    expect(ids()).toStrictEqual(ids());
+  });
+
+  it('keeps them apart from the organization\'s own views, so writing those never copies them', () => {
+    const { store } = storeWith([
+      lizView('liz-pods', 'home', { name: 'Pods', widgets: [] }),
+      configMap('templating-home', {
+        home: {
+          global: {
+            views: [{
+              id: 'org-1', name: 'Org', widgets: []
+            }]
+          }
+        }
+      }),
+    ]);
+    const scopes = appliedViewScopes(store.getters, 'home');
+
+    expect(scopes.global?.views.map((v) => v.id)).toStrictEqual(['org-1']);
+    expect(scopes.generated.map((v) => v.id)).toStrictEqual(['cm:liz-pods']);
+  });
+
+  it('keeps one whose view is not JSON it can read, empty, so it can still be taken away', () => {
+    const { store } = storeWith([{ ...lizView('liz-bad', 'home', {}), data: { page: 'home', view: '{not json' } }]);
+
+    expect(generatedViews(store.getters, 'home').map((v) => v.id)).toStrictEqual(['cm:liz-bad']);
+  });
+});
+
+describe('views Liz proposed', () => {
+  type Model = FakeConfigMap & { canUpdate?: boolean };
+
+  // The ConfigMaps as the management store holds them: models that can be removed and say whether the
+  // person signed in may change them. `clone` hands back a copy to change and save, as the store does.
+  function draftStore(maps: Model[]) {
+    const removed: string[] = [];
+    const saved: FakeConfigMap[] = [];
+    const models = maps.map((m) => ({
+      ...m,
+      remove: jest.fn(() => {
+        removed.push(m.metadata.name);
+
+        return Promise.resolve();
+      }),
+    }));
+    const getters = {
+      'management/byId': (_type: string, id: string) => models.find((m) => `${ m.metadata.namespace }/${ m.metadata.name }` === id),
+      'management/all':  () => models,
+      'prefs/get':       () => null,
+    };
+    const dispatch = jest.fn((action: string, spec: { resource: FakeConfigMap }) => {
+      if (action !== 'management/clone') {
+        return Promise.reject(new Error(action));
+      }
+      const copy = JSON.parse(JSON.stringify(spec.resource));
+
+      copy.save = jest.fn(() => {
+        saved.push(JSON.parse(JSON.stringify(copy)));
+
+        return Promise.resolve();
+      });
+
+      return Promise.resolve(copy);
+    });
+
+    return {
+      store: { getters, dispatch } as unknown as VuexStore, removed, saved
+    };
+  }
+
+  const proposal = (name: string, view: unknown, extra: Record<string, string> = {}): Model => configMap(name, {
+    page: 'home', view, ...extra
+  }, 'view-draft');
+  const published = (name: string, view: unknown): Model => configMap(name, { page: 'home', view }, 'view');
+  const platform = published('liz-view-platform', { name: 'Platform', widgets: [] });
+  const change = proposal('liz-view-platform-change', { name: 'Platform', widgets: [{ type: 'widget', widget: { kind: 'statusCards' } }] }, { replaces: 'liz-view-platform' });
+
+  it('shows a proposal only to who may change it, apart from the published views', () => {
+    const { store } = draftStore([
+      proposal('liz-view-new', { name: 'New', widgets: [] }),
+      { ...proposal('liz-view-hidden', { name: 'Hidden', widgets: [] }), canUpdate: false },
+      platform,
+      change,
+    ]);
+    const scopes = appliedViewScopes(store.getters, 'home');
+
+    expect(scopes.drafts.map((v) => [v.id, v.draft])).toStrictEqual([
+      ['draft:liz-view-new', {}],
+      ['draft:liz-view-platform-change', { replaces: 'liz-view-platform', replacesName: 'Platform' }],
+    ]);
+    expect(scopes.generated.map((v) => v.id)).toStrictEqual(['cm:liz-view-platform']);
+    expect(appliedViewScopes(store.getters, 'clusterDashboard').drafts).toStrictEqual([]);
+  });
+
+  it('says when the view a change replaces is not there any more', () => {
+    const { store } = draftStore([change]);
+
+    expect(appliedViewScopes(store.getters, 'home').drafts[0].draft).toStrictEqual({ replaces: 'liz-view-platform', replacesName: '' });
+  });
+
+  it('publishes a new view where it is, and opens it by the id a published view of Liz\'s has', async() => {
+    const { store, saved, removed } = draftStore([proposal('liz-view-new', { name: 'New', widgets: [] })]);
+
+    expect(await approveDraft(store, 'draft:liz-view-new')).toBe('cm:liz-view-new');
+    expect(saved.map((cm) => [cm.metadata.name, cm.metadata.labels['templates.rancher.io/type']])).toStrictEqual([['liz-view-new', 'view']]);
+    expect(removed).toStrictEqual([]);
+  });
+
+  it('writes a change into the view it replaces, then removes the proposal', async() => {
+    const { store, saved, removed } = draftStore([platform, change]);
+
+    expect(await approveDraft(store, 'draft:liz-view-platform-change')).toBe('cm:liz-view-platform');
+    expect(saved.map((cm) => [cm.metadata.name, cm.metadata.labels['templates.rancher.io/type'], cm.data.view])).toStrictEqual([
+      ['liz-view-platform', 'view', change.data.view],
+    ]);
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
+  });
+
+  it('takes out a copy of her view published from the editor, which stood in for it, so everyone sees the change', async() => {
+    const org = {
+      views: [{
+        id: 'cm:liz-view-platform', name: 'Platform, edited', widgets: []
+      }, {
+        id: 'view-other', name: 'Other', widgets: []
+      }]
+    };
+    const home = configMap('templating-home', { home: { global: org } });
+    const { store, saved, removed } = draftStore([platform, change, home]);
+
+    await approveDraft(store, 'draft:liz-view-platform-change');
+
+    const stored = store.getters['management/byId']('configmap', 'default/templating-home') as FakeConfigMap;
+
+    expect(saved.map((cm) => [cm.metadata.name, cm.data.view])).toStrictEqual([['liz-view-platform', change.data.view]]);
+    expect(JSON.parse(stored.data.home).global.views.map((v: { id: string }) => v.id)).toStrictEqual(['view-other']);
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
+  });
+
+  it('refuses a proposal that is gone, and a change to a view that is gone, writing nothing', async() => {
+    const gone = draftStore([]);
+    const targetGone = draftStore([change]);
+
+    await expect(approveDraft(gone.store, 'draft:liz-view-new')).rejects.toStrictEqual(new DraftError('gone'));
+    await expect(approveDraft(targetGone.store, 'draft:liz-view-platform-change')).rejects.toStrictEqual(new DraftError('targetGone'));
+    expect([...gone.saved, ...targetGone.saved, ...targetGone.removed]).toStrictEqual([]);
+  });
+
+  it('throws a proposal away, and never a published view by mistake', async() => {
+    const { store, removed } = draftStore([platform, change]);
+
+    await discardDraft(store, 'draft:liz-view-platform-change');
+    await discardDraft(store, 'draft:liz-view-platform');
+
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
+  });
+});
+
+describe('other widgets, added as code', () => {
+  const widget = (name: string, data: Record<string, string>) => configMap(name, data, 'widget');
+
+  it('reads each from a ConfigMap of its own', () => {
+    const { store } = storeWith([widget('liz-widget-b', {
+      displayName: 'B', description: 'two', component: '<template />'
+    }), widget('liz-widget-a', { component: '<p />' })]);
+
+    // By name as people read it; a widget with no displayName is called by its ConfigMap's name
+    expect(generatedWidgets(store.getters).map((w) => [w.name, w.displayName, w.description, w.source])).toStrictEqual([
+      ['liz-widget-b', 'B', 'two', '<template />'],
+      ['liz-widget-a', 'liz-widget-a', '', '<p />'],
+    ]);
+  });
+
+  it('says when each was created, and which version of its ConfigMap it is', () => {
+    const one = widget('liz-widget-a', { component: '<p />' });
+
+    Object.assign(one.metadata, { creationTimestamp: '2026-11-01T10:00:00Z', resourceVersion: '42' });
+    const { store } = storeWith([one]);
+
+    expect(generatedWidgets(store.getters).map((w) => [w.name, w.created, w.version])).toStrictEqual([['liz-widget-a', '2026-11-01T10:00:00Z', '42']]);
+  });
+
+  it('reads when each last changed on its own, as the store leaves those records out, and skips one it cannot read', async() => {
+    const dispatch = jest.fn((_: string, { url }: { url: string }) => (url.endsWith('/liz-widget-gone') ? Promise.reject(new Error('404')) : Promise.resolve({ metadata: { managedFields: [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }] } })));
+
+    expect(await fetchWidgetChanges({ dispatch } as unknown as VuexStore, ['liz-widget-a', 'liz-widget-gone'])).toStrictEqual({ 'liz-widget-a': '2026-11-20T08:30:00Z' });
+    // A plain request, which leaves the store's ConfigMaps as they are
+    expect(dispatch.mock.calls).toStrictEqual([
+      ['management/request', { url: '/v1/configmaps/default/liz-widget-a' }],
+      ['management/request', { url: '/v1/configmaps/default/liz-widget-gone' }],
+    ]);
+  });
+
+  describe('approvals', () => {
+    const SETTING = 'management.cattle.io.setting';
+
+    // The approvals setting as the store holds it: a model with a value, whose save may fail
+    function setting(value: unknown, { canUpdate = true, saves = true } = {}) {
+      return {
+        type:  SETTING,
+        value: typeof value === 'string' ? value : JSON.stringify(value),
+        canUpdate,
+        save:  jest.fn(() => (saves ? Promise.resolve() : Promise.reject(new Error('forbidden')))),
+      };
+    }
+
+    // A store whose management/byId has the approvals setting (or none), and whose clone and create
+    // hand back models of their own, kept to be read back
+    function storeWithSetting(approvals: ReturnType<typeof setting> | undefined, saves = true) {
+      const { store, created } = storeWith([configMap('templating-config', { approvedWidgets: { 'liz-widget-old': 'h-old' } })]);
+      const getters = store.getters as Record<string, unknown>;
+      const byId = getters['management/byId'] as (type: string, id: string) => unknown;
+      const made: ReturnType<typeof setting>[] = [];
+
+      getters['management/byId'] = (type: string, id: string) => (type === SETTING ? (id === 'ui-configurable-views-widget-approvals' ? approvals : undefined) : byId(type, id));
+      getters['auth/user'] = { id: 'u-abc', username: 'admin' };
+      (store as unknown as { dispatch: jest.Mock }).dispatch = jest.fn((action: string, arg: { resource?: { value?: string }; value?: string }) => {
+        const copy = setting(action === 'management/clone' ? arg.resource?.value || '{}' : arg.value || '{}', { saves });
+
+        made.push(copy);
+
+        return Promise.resolve(action === 'management/create' ? { ...copy, ...arg } : copy);
+      });
+
+      return {
+        store, made, created
+      };
+    }
+
+    it('are read from the approvals setting, and only those with the hash of the code', () => {
+      const { store } = storeWithSetting(setting({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
+        },
+        'liz-widget-bad': { by: 'admin' },
+        'liz-widget-str': 'h2',
+      }));
+
+      expect(widgetApprovals(store.getters)).toStrictEqual({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00Z'
+        }
+      });
+    });
+
+    it('no longer count when kept in templating-config, where a project member can write them', () => {
+      const { store } = storeWithSetting(undefined);
+
+      expect(widgetApprovals(store.getters)).toStrictEqual({});
+    });
+
+    it('record the hash approved, who approved it and when - written on a copy, so the stored approvals change only once saved', async() => {
+      jest.useFakeTimers({ now: new Date('2026-11-24T10:00:00Z') });
+      const stored = setting({});
+      const { store, made } = storeWithSetting(stored);
+
+      await setWidgetApproval(store, 'liz-widget-a', 'h1');
+      jest.useRealTimers();
+
+      expect(JSON.parse(made[0].value)).toStrictEqual({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: '2026-11-24T10:00:00.000Z'
+        }
+      });
+      expect(made[0].save).toHaveBeenCalledTimes(1);
+      expect(stored.value).toBe('{}');
+    });
+
+    it('leave what is stored as it was when the save fails', async() => {
+      const stored = setting({
+        'liz-widget-a': {
+          hash: 'h1', by: 'admin', at: ''
+        }
+      });
+      const { store } = storeWithSetting(stored, false);
+
+      await expect(setWidgetApproval(store, 'liz-widget-a', null)).rejects.toThrow('forbidden');
+      expect(widgetApprovals(store.getters)['liz-widget-a']?.hash).toBe('h1');
+    });
+
+    it('create the setting with the first approval', async() => {
+      const { store, made } = storeWithSetting(undefined);
+
+      await setWidgetApproval(store, 'liz-widget-a', 'h1');
+
+      expect(store.dispatch).toHaveBeenCalledWith('management/create', expect.objectContaining({ type: SETTING, metadata: { name: 'ui-configurable-views-widget-approvals' } }));
+      expect(made[0].save).toHaveBeenCalledTimes(1);
+    });
+
+    describe('who can approve', () => {
+      it('is whoever can change the approvals setting, once there is one', () => {
+        expect(canApproveWidgets(storeWithSetting(setting({}, { canUpdate: false })).store.getters)).toBe(false);
+        expect(canApproveWidgets(storeWithSetting(setting({}, { canUpdate: true })).store.getters)).toBe(true);
+      });
+
+      it('is whoever can create settings, before there is one - not whoever can write ConfigMaps', () => {
+        const { store } = storeWithSetting(undefined);
+        const getters = store.getters as Record<string, unknown>;
+
+        getters['management/schemaFor'] = (type: string) => (type === SETTING ? { collectionMethods: ['GET', 'post'] } : { collectionMethods: ['GET'] });
+        expect(canApproveWidgets(store.getters)).toBe(true);
+        getters['management/schemaFor'] = (type: string) => (type === SETTING ? { collectionMethods: ['GET'] } : { collectionMethods: ['GET', 'POST'] });
+        expect(canApproveWidgets(store.getters)).toBe(false);
+      });
+    });
+  });
+});
+

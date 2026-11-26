@@ -14,3 +14,4 @@ The views bar stays hidden until you open it from the header button or with **Sh
 ### Deployment Path
 * **Prerequisites**: Rancher Prime 2.16 or newer.
 * **First Step**: Install **Configurable Views** from the Extensions catalog, open the Home page or a cluster's dashboard, then open the views bar and edit the view.
+* **With Liz**: Where the SUSE AI Assistant is installed, the package adds two agents to Liz the first time an administrator opens the Home page or a cluster's dashboard, so Liz can build views and write widgets. **Configurable Views > Settings** shows them.

@@ -74,7 +74,12 @@ const props = withDefaults(defineProps<{
   startedFrom?: string;
   /** Whether the editor's drawer is open, while editing. */
   drawerOpen?: boolean;
+  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll, in the plain script block). */
+  page?: string;
+  /** What Liz proposed, waiting for approval: tabs of their own after the views, with no menu. */
+  drafts?: View[];
 }>(), {
+  drafts:       () => [],
   views:        () => [],
   activeId:     '',
   editing:      false,
@@ -86,6 +91,7 @@ const props = withDefaults(defineProps<{
   saving:       false,
   startedFrom:  '',
   drawerOpen:   true,
+  page:         '',
 });
 
 const emit = defineEmits<BarEmits>();
@@ -96,9 +102,6 @@ const { t } = useI18n(store);
 const root = ref<HTMLElement | null>(null);
 
 const tabStrip = ref<HTMLElement | null>(null);
-
-// The editable name while editing - inside the tab loop, so a list; at most one is rendered.
-const nameInput = ref<HTMLInputElement[]>([]);
 
 /** Function refs, as there is a set per tab */
 const tabWraps = new Map<string, HTMLElement>();
@@ -137,7 +140,8 @@ let tabScrollFrame = 0;
 
 const shortcuts = computed(() => ({ duplicate: shortcutLabel([isMac ? '⌘' : 'Ctrl', 'D']) }));
 
-const activeView = computed(() => props.views.find((v) => v.id === props.activeId) || null);
+// A proposal of Liz's can be the open one too: a link to it opens it (see usePageViews)
+const activeView = computed(() => props.views.find((v) => v.id === props.activeId) || props.drafts.find((v) => v.id === props.activeId) || null);
 
 // "Changes are saved to your account only." — unless this view IS the organization template, in
 // which case saving it changes what everyone sees, and the bar must say so.
@@ -287,7 +291,7 @@ const {
 });
 
 const startTabDrag = (view: View, event: MouseEvent) => {
-  if (event.button !== 0 || props.editing || renamingId.value || props.views.findIndex((v) => v.id === view.id) < LOCKED_TAB_COUNT) {
+  if (event.button !== 0 || renamingId.value || props.views.findIndex((v) => v.id === view.id) < LOCKED_TAB_COUNT) {
     return;
   }
 
@@ -471,9 +475,42 @@ function onName(ev: Event): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onShortcut);
+
+  // A bar drawn again - the page moved between Rancher's own page and a view of widgets - picks up
+  // where the last one was scrolled to, and keeps the open view's tab in sight
+  nextTick(() => {
+    const strip = tabStrip.value;
+    const active = activeView.value && tabButton(activeView.value);
+
+    if (!strip) {
+      return;
+    }
+
+    strip.scrollLeft = viewBarScroll[props.page] || 0;
+
+    if (active) {
+      const tab = active.getBoundingClientRect();
+      const box = strip.getBoundingClientRect();
+
+      if (tab.left < box.left || tab.right > box.right) {
+        active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+    }
+  });
+});
+
+// A proposal opened from a link, with the bar already there: its tab is at the end of the strip, so
+// bring it into sight. Views are opened by their tabs, which are in sight already.
+watch(() => props.activeId, (id) => {
+  const draft = props.drafts.find((view) => view.id === id);
+
+  if (draft) {
+    nextTick(() => tabButton(draft)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+  }
 });
 
 onBeforeUnmount(() => {
+  viewBarScroll[props.page] = tabStrip.value?.scrollLeft || 0;
   window.removeEventListener('keydown', onShortcut);
   clearTimeout(flashTimer);
   cancelAnimationFrame(flashFrame);
@@ -483,6 +520,17 @@ onBeforeUnmount(() => {
 defineExpose({ openRename, focusTab });
 </script>
 
+<script lang="ts">
+/**
+ * Where each page's tab strip was scrolled to - by page, as the Home and a cluster's dashboard each have
+ * a bar, and views, of their own. Kept for the module, not for one bar: the bar is drawn again from
+ * scratch when the page switches between Rancher's own page and a view of widgets, which are laid out
+ * differently and each have their own bar. Without it the new bar starts at the beginning of the strip,
+ * so picking a tab far along it jumped the strip back to the start.
+ */
+const viewBarScroll: Record<string, number> = {};
+</script>
+
 
 <template>
   <div
@@ -490,9 +538,10 @@ defineExpose({ openRename, focusTab });
     class="vbar"
     :class="{ 'vbar--editing': editing }"
   >
-    <!-- The views. While editing, the one being edited is renamed in place and the rest go quiet:
-       you cannot switch away mid-edit without deciding what to do with your changes. -->
+    <!-- The views, to switch between. While editing they make way for the view being edited (see
+       vbar__title): you cannot switch away mid-edit without deciding what to do with your changes. -->
     <div
+      v-if="!editing"
       ref="tabStrip"
       class="vbar__views"
     >
@@ -515,22 +564,14 @@ defineExpose({ openRename, focusTab });
           :class="{
             held: heldTabKey === view.id,
             flash: flashTabId === view.id,
-            'vbar__slot--active': !editing && view.id === activeId,
-            'vbar__slot--field': (editing && view.id === activeId) || renamingId === view.id,
+            'vbar__slot--active': view.id === activeId,
+            'vbar__slot--field': renamingId === view.id,
           }"
           :data-testid="`configurable-views-tab-${ view.id }`"
           @mousedown="startTabDrag(view, $event)"
         >
           <input
-            v-if="editing && view.id === activeId"
-            ref="nameInput"
-            class="vbar__name"
-            :value="view.name"
-            :aria-label="t('configurableViews.bar.viewName')"
-            @input="onName"
-          >
-          <input
-            v-else-if="renamingId === view.id"
+            v-if="renamingId === view.id"
             :ref="(el) => keepRef(renameInputs, view.id, el as HTMLInputElement | null)"
             v-model="renameDraft"
             type="text"
@@ -558,7 +599,6 @@ defineExpose({ openRename, focusTab });
               class="vbar__view"
               :aria-selected="view.id === activeId"
               :tabindex="view.id === focusableTabId ? 0 : -1"
-              :disabled="editing"
               @click="$emit('select', view.id)"
               @keydown.left.prevent="stepTab(-1)"
               @keydown.right.prevent="stepTab(1)"
@@ -584,7 +624,6 @@ defineExpose({ openRename, focusTab });
             </rc-button>
 
             <rc-dropdown-trigger
-              v-if="!editing"
               variant="ghost"
               size="small"
               class="vbar__caret"
@@ -696,12 +735,59 @@ defineExpose({ openRename, focusTab });
         </div>
       </TransitionGroup>
 
+      <!-- What Liz proposed: a group of its own after the views, as none of them is ordered, edited or
+         made the default. Approve and Discard are on the page, above the proposal. -->
+      <div
+        v-if="drafts.length"
+        class="vbar__list vbar__drafts"
+        role="tablist"
+        :aria-label="t('configurableViews.drafts.label')"
+      >
+        <div
+          v-for="view in drafts"
+          :key="view.id"
+          class="vbar__slot"
+          :class="{ 'vbar__slot--active': view.id === activeId }"
+          :data-testid="`configurable-views-draft-${ view.id }`"
+        >
+          <rc-button
+            :ref="(el) => keepTabButton(view.id, el as ComponentPublicInstance | null)"
+            variant="ghost"
+            size="small"
+            role="tab"
+            class="vbar__view"
+            :aria-selected="view.id === activeId"
+            @click="$emit('select', view.id)"
+          >
+            <span class="vbar__proposed">{{ t('configurableViews.drafts.pill') }}</span>
+            {{ view.name }}
+          </rc-button>
+        </div>
+      </div>
+
       <!-- Sticky at the end of the strip: the scroll shadow over the tabs passing under it, gone at the end -->
       <span
         class="vbar__shadow"
         aria-hidden="true"
       />
     </div>
+
+    <!-- While editing: the view being edited, by its name, renamed where it stands - at the start of the
+       bar, whichever view it is, so there is no strip of tabs to find it in -->
+    <label
+      v-else
+      class="vbar__title"
+    >
+      <i class="icon icon-edit vbar__pencil" />
+      <input
+        class="vbar__title-input"
+        :value="activeView?.name || ''"
+        :placeholder="t('configurableViews.page.untitled')"
+        :aria-label="t('configurableViews.bar.viewName')"
+        data-testid="configurable-views-title"
+        @input="onName"
+      >
+    </label>
 
     <rc-button
       v-if="!editing"
@@ -715,7 +801,6 @@ defineExpose({ openRename, focusTab });
     </rc-button>
 
     <template v-if="editing">
-      <i class="icon icon-edit vbar__pencil" />
       <span class="vbar__mode">{{ isNew ? t('configurableViews.bar.newView') : t('configurableViews.bar.editing') }}</span>
       <span class="vbar__hint">{{ editingHint }}</span>
 
@@ -995,6 +1080,20 @@ $tab-height: 30px;
     width:         6px;
   }
 
+  // What Liz proposed: a group apart from the views, each tab marked as a proposal
+  &__drafts {
+    margin-left: 8px;
+  }
+
+  &__proposed {
+    border:        1px solid currentColor;
+    border-radius: var(--border-radius);
+    font-size:     11px;
+    line-height:   16px;
+    margin-right:  6px;
+    padding:       0 4px;
+  }
+
   // The active view's name, edited where the tab was.
   &__name {
     background:    var(--body-bg);
@@ -1008,6 +1107,49 @@ $tab-height: 30px;
     // 1px more below than above: the font sits a little low in the box, in every browser.
     padding:       0 10px 1px;
     width:         180px;
+  }
+
+  // The view being edited, by name, at the start of the bar: a rename box - bordered, with a pencil -
+  // so it reads as the place to name the view. What it is (New view / Editing) follows it.
+  &__title {
+    align-items:   center;
+    background:    var(--body-bg);
+    border:        1px solid var(--border);
+    border-radius: var(--border-radius);
+    cursor:        text;
+    display:       flex;
+    flex:          0 1 320px;
+    gap:           8px;
+    height:        32px;
+    min-width:     160px;
+    padding:       0 10px;
+
+    &:hover {
+      border-color: var(--input-hover-border, var(--primary));
+    }
+
+    &:focus-within {
+      border-color: var(--primary);
+      box-shadow:   0 0 0 1px var(--primary);
+    }
+
+    .vbar__pencil {
+      color:     var(--muted);
+      font-size: 14px;
+    }
+  }
+
+  &__title-input {
+    background:  transparent;
+    border:      none;
+    color:       var(--body-text);
+    flex:        1 1 auto;
+    font-size:   14px;
+    font-weight: 600;
+    height:      100%;
+    min-width:   0;
+    outline:     none;
+    padding:     0;
   }
 
   &__pencil {

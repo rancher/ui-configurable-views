@@ -7,12 +7,14 @@ import Tab from '@shell/components/Tabbed/Tab.vue';
 import { RcButton } from '@components/RcButton';
 import CatalogTile from './CatalogTile.vue';
 import {
-  BUILDING_BLOCKS, READY_MADE, searchCatalog, blockLabelKey, type CatalogEntry
+  BUILDING_BLOCKS, READY_MADE, searchCatalog, blockLabelKey, generatedEntries, entryLabel, entryDesc, type CatalogEntry
 } from '../templating/widget-catalog';
 import {
   WIDTH_PRESETS, HEIGHT_PRESETS, SPACING_PRESETS,
   DEFAULT_GAP, DEFAULT_PAGE_PADDING, widthPresetOf, heightPresetOf, spacingPresetOf
 } from '../templating/view-model';
+import { generatedWidgets, widgetApprovals } from '../templating/template-engine';
+import { useWidgetHashes } from '../composables/useWidgetHashes';
 import type { View, WidgetNode } from '../templating/types';
 
 // The "Edit view" drawer. Three tabs, and the split between them is the point:
@@ -171,9 +173,20 @@ const heights = HEIGHT_PRESETS;
 const spacings = SPACING_PRESETS;
 
 /** Searched as it reads: the translated name and description. */
-const tileText = (entry: CatalogEntry) => `${ t(entry.labelKey) } ${ t(entry.descKey) }`;
+const tileText = (entry: CatalogEntry) => `${ entryLabel(entry, t) } ${ entryDesc(entry, t) }`;
 const blocks = computed(() => searchCatalog(BUILDING_BLOCKS, search.value, tileText));
 const readyMade = computed(() => searchCatalog(READY_MADE, search.value, tileText));
+// The other widgets, added as code by Liz or by an admin: new kinds of widget, dropped like any other.
+// Only those an admin approved, and whose code is still the code approved: one changed since would only
+// say, once added, that it needs approving again
+const lizWidgets = computed(() => generatedWidgets(store.getters));
+const lizHashes = useWidgetHashes(() => lizWidgets.value);
+const generated = computed(() => {
+  const approvals = widgetApprovals(store.getters);
+  const current = lizWidgets.value.filter((w) => !!approvals[w.name] && approvals[w.name].hash === lizHashes.value[w.name]);
+
+  return searchCatalog(generatedEntries(current, approvals), search.value, tileText);
+});
 
 const gap = computed(() => (props.view && 'gap' in props.view ? props.view.gap : DEFAULT_GAP));
 const pagePadding = computed(() => (props.view && 'pad' in props.view ? props.view.pad : DEFAULT_PAGE_PADDING));
@@ -370,6 +383,25 @@ function valueOf(ev: Event): string {
             {{ t('configurableViews.sidebar.noReadyMade', { query: search }) }}
           </p>
         </div>
+
+        <template v-if="generated.length">
+          <h4 class="evs__group">
+            {{ t('configurableViews.sidebar.generated') }}
+          </h4>
+          <p class="evs__hint">
+            {{ t('configurableViews.sidebar.generatedHint') }}
+          </p>
+          <div class="evs__tiles">
+            <CatalogTile
+              v-for="entry in generated"
+              :key="entry.id"
+              :entry="entry"
+              @dragstart="(e, ev) => $emit('drag-start', e, ev)"
+              @dragend="$emit('drag-end')"
+              @add="$emit('add', $event)"
+            />
+          </div>
+        </template>
       </template>
 
       <!-- ---- LAYOUT ---- -->

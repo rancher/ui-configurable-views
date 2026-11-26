@@ -23,11 +23,18 @@ import {
   NODE_WIDGET, type LayoutView, type View, type Sides, type StockView, type PageViews, type WidgetKind,
   type WidgetNode, type WidgetPlace, type WidgetSpec, type WidgetTab, type MetricsDashboard
 } from './types';
+import { normalizeStatusCards } from './status-cards';
 
 export { NODE_WIDGET };
 
 /** The widget that shows rows of a type. */
 const TABLE_KIND = 'table';
+
+/** The widget that counts a cluster's resources into status cards. */
+const STATUS_KIND = 'statusCards';
+
+/** An other widget: one added as code, by Liz or by an admin. */
+const GENERATED_KIND = 'generated';
 
 /** The widget that holds other widgets, in tabs. */
 const TABS_KIND = 'tabs';
@@ -304,6 +311,12 @@ export function normalizeWidget(widget: unknown): WidgetSpec {
   if (out.kind === TABS_KIND) {
     out.tabs = normalizeTabs(w.tabs);
   }
+  if (out.kind === STATUS_KIND) {
+    out.status = normalizeStatusCards(w.status);
+  }
+  if (out.kind === GENERATED_KIND) {
+    out.component = str(w.component);
+  }
 
   return out;
 }
@@ -510,6 +523,11 @@ export function orderViews<T extends View>(views: T[], order: string[] | undefin
   return placed;
 }
 
+/** A view as storage reads it back: what is stored of it, and nothing else. */
+export function storedForm(view: View): View {
+  return normalizeView(JSON.parse(JSON.stringify(view)) as Loose);
+}
+
 function normalizeView(view: Loose): View {
   // A stock view carries no widgets — there is nothing to lay out.
   const out: View = isStockView(view) ? {
@@ -532,6 +550,10 @@ function normalizeView(view: Loose): View {
   // or the fork and its source both show up in the bar as two views with the same name.
   if (view.from) {
     out.from = str(view.from);
+  }
+  // ...and what it showed then, which decides whether the copy still follows it.
+  if (view.fromHash) {
+    out.fromHash = str(view.fromHash);
   }
 
   return out;
@@ -561,8 +583,9 @@ export function migratePageViews(value: unknown): PageViews {
     const out: PageViews = { views };
     const defaultId = str(source?.defaultViewId);
 
-    // Which view opens first. Dropped when it names a view that no longer exists.
-    if (defaultId && out.views.some((p) => p.id === defaultId)) {
+    // Which view opens first. Kept when it names none of these: a person's default can name a published
+    // view, which is not among their own. One that names nothing any more is passed over where it is read.
+    if (defaultId) {
       out.defaultViewId = defaultId;
     }
 

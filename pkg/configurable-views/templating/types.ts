@@ -1,3 +1,4 @@
+import type { StatusCardsConfig } from './status-cards';
 import type { RancherKubeMetadata } from '@shell/types/rancher/steve.api';
 
 /**
@@ -37,6 +38,8 @@ export type WidgetKind =
   | 'clusterAlerts'
   | 'clusterMetrics'
   | 'clusterExtensionCards'
+  | 'statusCards'
+  | 'generated'
   | 'tabs';
 
 /** Which of the cluster dashboard's Grafana dashboards a metrics widget shows. */
@@ -86,6 +89,10 @@ export interface WidgetSpec {
   metrics?: MetricsDashboard;
   /** A Tabs widget's tabs, each with widgets of its own. */
   tabs?: WidgetTab[];
+  /** A status widget's cards: what is counted, how it is split into cards and rows, and coloured. */
+  status?: StatusCardsConfig;
+  /** An other widget, added as code: the name of the ConfigMap holding it (see generatedWidgets). */
+  component?: string;
 }
 
 /**
@@ -137,6 +144,17 @@ export interface WidgetNode extends NodeBox {
 }
 
 /**
+ * On a view Liz proposed and nobody approved yet (see generatedDrafts): for a change to one of her
+ * views, the ConfigMap it replaces and that view's name. Never stored - it says where the view came from.
+ */
+export interface DraftInfo {
+  replaces?: string;
+  replacesName?: string;
+  /** Which version of the proposal's ConfigMap this is. */
+  version?: string;
+}
+
+/**
  * A VIEW: one named arrangement of a page's widgets, and a tab in the bar when the page has more
  * than one.
  *
@@ -156,6 +174,13 @@ export interface LayoutView {
   org?: boolean;
   /** The published view this one was forked from. */
   from?: string;
+  /**
+   * What that published view showed when this copy was made (see contentHash). A copy still showing it
+   * follows the published view; one changed since is the person's own.
+   */
+  fromHash?: string;
+  /** Liz proposed it, and it waits for approval. */
+  draft?: DraftInfo;
 }
 
 /** Rancher's own page - the Home, a cluster's dashboard - kept as a view. No grid, nothing to lay out. */
@@ -165,6 +190,8 @@ export interface StockView {
   kind: 'stock';
   org?: boolean;
   from?: string;
+  fromHash?: string;
+  draft?: DraftInfo;
 }
 
 export type View = LayoutView | StockView;

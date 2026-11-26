@@ -1,13 +1,13 @@
 import { computed, ref, watch } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { I18n } from '@shell/composables/useI18n';
 import {
-  isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, type PageKey
+  isTemplatingEnabled, viewsOffInUrl, appliedViewScopes, saveView, fetchTemplatingConfigMaps, DRAFT_VIEW_PREFIX, GENERATED_VIEW_PREFIX, type PageKey
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
 import {
-  DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews
+  DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews, storedForm
 } from '../templating/view-model';
 import type { SettingsAnchor } from './viewEditor';
 import type { LayoutView, View, PageViews } from '../templating/types';
@@ -15,18 +15,77 @@ import type { LayoutView, View, PageViews } from '../templating/types';
 
 export const clone = <T, >(value: T): T => JSON.parse(JSON.stringify(value));
 
+/** JSON with every object's keys in order: the same content reads the same however it was put together. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+}
+
 /**
  * What a view shows, without what only says WHICH view it is (its id, the published view it was copied
  * from, whether it is the organization's) - so a copy and its source compare equal until one changes.
+ * Read as storage reads it back, keys in order: the editor's own version of a view holds the same
+ * content in another order, and with values storage rewrites.
  */
 export function viewContent(view: View): string {
-  const copy: Partial<View> = { ...view };
+  const copy: Partial<View> = { ...storedForm(view) };
 
   delete copy.id;
   delete copy.from;
+  delete copy.fromHash;
   delete copy.org;
 
-  return JSON.stringify(copy);
+  return canonical(copy);
+}
+
+/** A short fingerprint of what a view shows (FNV-1a over viewContent): what a copy keeps of its source. */
+export function contentHash(view: View): string {
+  const text = viewContent(view);
+  let hash = 0x811c9dc5;
+
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/** Your copy of a published view, as it is made: remembering what that view showed. */
+export function copyOf(view: View, id = newId('view')): View {
+  const copy: View = {
+    ...clone(view), id, from: view.id, fromHash: contentHash(view)
+  };
+
+  delete copy.org;
+
+  return copy;
+}
+
+/**
+ * Your stored views, with each copy of a published view that you have not changed following that view:
+ * a copy still showing what the published view showed when it was made takes what it shows now, under
+ * its own id - so a default, a place in the bar and an open tab stay put. A copy you changed stays
+ * yours, and the page says when the published view changed under it (see outdatedIds).
+ */
+export function followPublished(set: PageViews | null, published: View[]): PageViews | null {
+  if (!set) {
+    return set;
+  }
+
+  const sources = new Map(published.map((p) => [p.id, p]));
+  let followed = false;
+  const views = set.views.map((view) => {
+    const source = view.from ? sources.get(view.from) : undefined;
+
+    if (!source || !view.fromHash || contentHash(source) === view.fromHash || contentHash(view) !== view.fromHash) {
+      return view;
+    }
+    followed = true;
+
+    return copyOf(source, view.id);
+  });
+
+  return followed ? { ...set, views } : set;
 }
 
 /**
@@ -82,19 +141,34 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   const scopes = computed(() => appliedViewScopes(store.getters, props.page));
 
-  // Your saved views (what the editor writes), and the ones an admin published for the organization.
-  const userSet = computed<PageViews | null>(() => optimistic.value || scopes.value.user);
-  const orgViews = computed(() => scopes.value.global?.views || []);
+  // The organization's views, and after them the ones Liz built - unless the organization's already
+  // has one by that id (a copy of Liz's view published back), which then stands in for it.
+  const orgViews = computed(() => {
+    const own = scopes.value.global?.views || [];
+    const ids = new Set(own.map((p) => p.id));
+
+    return [...own, ...scopes.value.generated.filter((p) => !ids.has(p.id))];
+  });
   const orgIds = computed(() => new Set(orgViews.value.map((p) => p.id)));
+  // Your saved views (what the editor writes), with the copies you have not changed following the
+  // published views they came from (see followPublished).
+  const userSet = computed<PageViews | null>(() => followPublished(optimistic.value || scopes.value.user, orgViews.value));
 
   /** A working copy of your stored views, for an action to change and write back. */
   const userDraft = (): PageViews => (userSet.value ? clone(userSet.value) : { views: [] });
 
-  // What a brand-new view is seeded from: the organization template. A stock view is skipped — it
-  // has no grid, so starting from it would give you nothing to edit.
-  const orgTemplate = computed(() => orgViews.value.find((p): p is LayoutView => !isStockView(p)) || null);
+  /**
+   * The view a set opens on. A default can name a published view, which a copy of it then stands in for:
+   * making a view your default does not copy it, so it keeps following the published view. Once that
+   * view is unpublished, the copy is kept as a view of your own, and stays the default.
+   */
+  function resolveDefault(set: PageViews | null | undefined): string {
+    const id = set?.defaultViewId || '';
 
-  const defaultViewId = computed(() => userSet.value?.defaultViewId || '');
+    return (id && !set?.views.some((p) => p.id === id) && set?.views.find((p) => p.from === id)?.id) || id;
+  }
+
+  const defaultViewId = computed(() => resolveDefault(editing.value ? working.value : userSet.value));
 
   // Every view in the bar, in the order you dragged them into: the organization's, then your own,
   // until you do. The view the page opens on leads.
@@ -113,8 +187,27 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     // Rancher's own page is always one of the tabs.
     const list = all.some(isStockView) ? all : [builtInStockView(t('configurableViews.page.stockName')), ...all];
 
-    return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), defaultViewId.value);
+    return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), resolveDefault(set));
   });
+
+  // Proposals approved or discarded on this page, by id and version: the store can hold one a few
+  // seconds longer, when a read it started before the change lands after it. Each goes from here once
+  // the store no longer has it, so a new proposal by the same name shows.
+  const settled = ref<string[]>([]);
+  const draftKey = (view: View): string => `${ view.id }@${ view.draft?.version || '' }`;
+
+  // What Liz proposed for this page, for those who may publish it (see generatedDrafts): tabs of their
+  // own after the views, never ordered, edited or made the default. Out of the way while editing.
+  const drafts = computed<View[]>(() => (editing.value ? [] : scopes.value.drafts.filter((p) => !settled.value.includes(draftKey(p)))));
+
+  watch(() => scopes.value.drafts.map(draftKey), (now) => {
+    settled.value = settled.value.filter((key) => now.includes(key));
+  });
+
+  /** A proposal is approved or discarded: it leaves the page now, whatever the store still holds. */
+  function settleDraft(view: View): void {
+    settled.value = [...settled.value, draftKey(view)];
+  }
 
   /** The tabs showing a published view, or your copy of one. */
   const publishedIds = computed(() => views.value.filter((p) => p.org || (p.from && orgIds.value.has(p.from))).map((p) => p.id));
@@ -126,7 +219,37 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     return views.value.filter((p) => !p.org && p.from && published.has(p.from) && published.get(p.from) !== viewContent(p)).map((p) => p.id);
   });
 
-  const activeView = computed(() => views.value.find((p) => p.id === activeViewId.value) || views.value[0] || null);
+  /**
+   * Your changed copies whose published view changed since they were made - by Liz, or another publish
+   * - or that do not say what it showed then (copies made before they did). Those are not your changes
+   * alone: the page asks whether to take the published view or keep yours.
+   */
+  const outdatedIds = computed(() => {
+    const published = new Map(orgViews.value.map((p) => [p.id, contentHash(p)]));
+
+    return changedIds.value.filter((id) => {
+      const view = views.value.find((p) => p.id === id);
+
+      return !!view?.from && view.fromHash !== published.get(view.from);
+    });
+  });
+
+  /** A view's id as the bar has it: a published view you have a copy of is your copy. */
+  function viewIdFor(id: string | null): string | null {
+    if (!id || views.value.some((p) => p.id === id)) {
+      return id;
+    }
+
+    return views.value.find((p) => p.from === id)?.id || id;
+  }
+
+  /** A view of the bar, or a draft: anything that can be open */
+  const findView = (id: string | null): View | undefined => (id ? views.value.find((p) => p.id === id) || drafts.value.find((p) => p.id === id) : undefined);
+
+  const activeView = computed(() => findView(activeViewId.value) || views.value[0] || null);
+
+  /** The open view, when it is one Liz proposed */
+  const activeDraft = computed(() => (activeView.value?.draft ? activeView.value : null));
 
   const isNewView = computed(() => !!newViewId.value && newViewId.value === activeViewId.value);
 
@@ -141,7 +264,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
   // True when the draft differs from the last saved state.
   const dirty = computed(() => editing.value && savedBaseline.value !== null && JSON.stringify(working.value) !== savedBaseline.value);
 
-  const viewById = (id: string): View | null => views.value.find((p) => p.id === id) || null;
+  const viewById = (id: string): View | null => findView(id) || null;
 
   /** The view being edited, as it is in the draft. */
   function workingView(): View | null {
@@ -166,7 +289,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
    * never moved underneath you.
    */
   function syncActiveView(): void {
-    if (pinnedView.value && views.value.find((p) => p.id === activeViewId.value)) {
+    if (pinnedView.value && findView(activeViewId.value)) {
       return;
     }
 
@@ -187,7 +310,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   /** Move to a view on purpose — and remember that it was on purpose. */
   function setActiveView(id: string | null): void {
-    activeViewId.value = id;
+    activeViewId.value = viewIdFor(id);
     pinnedView.value = true;
     selectedNodeId.value = null;
   }
@@ -198,6 +321,32 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
       syncActiveView();
     }
   });
+
+  // A link to one view: `?view=<id>` opens it - what Liz links to when she has built one. Once it is open
+  // the query goes, so the tabs work as always and a reload opens the page as it would. A draft approved
+  // since keeps its name, so a link to it opens the published view. Waits for the views to arrive, as a
+  // new one may still be on its way to the store.
+  const router = useRouter();
+
+  watch([() => route?.query?.view, views, drafts], ([wanted]) => {
+    if (typeof wanted !== 'string' || !wanted || editing.value) {
+      return;
+    }
+
+    const published = wanted.startsWith(DRAFT_VIEW_PREFIX) ? `${ GENERATED_VIEW_PREFIX }${ wanted.slice(DRAFT_VIEW_PREFIX.length) }` : '';
+    const id = [wanted, published].map(viewIdFor).find((candidate) => candidate && findView(candidate));
+
+    if (!id) {
+      return;
+    }
+
+    setActiveView(id);
+
+    const query = { ...route.query };
+
+    delete query.view;
+    router?.replace({ query })?.catch?.(() => {});
+  }, { immediate: true });
 
   /**
    * What is published, read once; the person's own views are already here, with their preferences.
@@ -210,6 +359,10 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     syncActiveView();
     loaded.value = true;
   }
+
+  // Views also arrive from elsewhere - Liz builds one into a ConfigMap of its own while the page is
+  // open. Nothing here polls for them: the read above watches this package's ConfigMaps, and the
+  // management store fetches them again as soon as one is created, changed or deleted.
 
   // ---- writing ----
 
@@ -244,11 +397,8 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
       return view.id;
     }
 
-    const fork: View = {
-      ...clone(view), id: newId('view'), from: view.id
-    };
+    const fork = copyOf(view);
 
-    delete fork.org;
     draft.views.push(fork);
 
     return fork.id;
@@ -274,12 +424,16 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     orgViews,
     orgIds,
     userDraft,
-    orgTemplate,
     defaultViewId,
     views,
+    drafts,
     publishedIds,
     changedIds,
+    outdatedIds,
+    viewIdFor,
+    settleDraft,
     activeView,
+    activeDraft,
     isNewView,
     activeIsStock,
     widgets,

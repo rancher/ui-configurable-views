@@ -1,4 +1,4 @@
-import { isListable, typeOptions, type TypeSchema } from '@pkg/configurable-views/templating/resource-types';
+import { isListable, typeOfOption, typeOptions, type TypeSchema } from '@pkg/configurable-views/templating/resource-types';
 
 const schema = (id: string, kind: string, group = '', extra: Partial<TypeSchema> = {}): TypeSchema => ({
   id,
@@ -43,5 +43,21 @@ describe('typeOptions', () => {
   it('keeps the type a widget already shows when it is not on the list, at the top', () => {
     expect(typeOptions(schemas, 'example.com.widget')[0]).toStrictEqual({ label: 'example.com.widget', value: 'example.com.widget' });
     expect(typeOptions(schemas, 'pod')[0].kind).toBe('group');
+  });
+
+  it('keeps every type a widget that counts several already has, when they are not on the list', () => {
+    expect(typeOptions(schemas, ['example.com.widget', 'pod', 'example.com.gadget']).slice(0, 2)).toStrictEqual([
+      { label: 'example.com.widget', value: 'example.com.widget' },
+      { label: 'example.com.gadget', value: 'example.com.gadget' },
+    ]);
+    expect(typeOptions(schemas, [])[0].kind).toBe('group');
+  });
+});
+
+describe('typeOfOption', () => {
+  it('is the type picked, or the text typed in', () => {
+    expect(typeOfOption({ label: 'Pod', value: 'pod' })).toBe('pod');
+    expect(typeOfOption({ label: 'example.com.widget' })).toBe('example.com.widget');
+    expect(typeOfOption('pod')).toBe('pod');
   });
 });

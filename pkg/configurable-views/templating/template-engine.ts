@@ -14,12 +14,16 @@
 //
 // Someone who cannot read that ConfigMap does not see published views. It is a prototype's storage,
 // until they move to a CRD.
+//
+// Liz writes what she builds into ConfigMaps of their own, beside it: a view each (see generatedViews),
+// and a widget each (see generatedWidgets), whose code runs once an admin approves it. The approvals
+// are kept in a Rancher setting, which only admins can write (see APPROVALS_SETTING).
 
 import type { VuexStore } from '@shell/types/store/vuex';
-import { CONFIG_MAP } from '@shell/config/types';
+import { CONFIG_MAP, MANAGEMENT } from '@shell/config/types';
 import { PREF_ENABLED, PREF_VIEWS, definePrefs, savePref } from './user-prefs';
 import { migratePageViews } from './view-model';
-import type { PageViews } from './types';
+import type { PageViews, View } from './types';
 
 type Getters = VuexStore['getters'];
 
@@ -30,6 +34,12 @@ const NAMESPACE = 'default';
 const LABEL_MARKER = 'templates.rancher.io/ai-templating';
 const LABEL_TYPE = 'templates.rancher.io/type';
 const TYPE_CONFIG = 'config';
+/** A view in a ConfigMap of its own - what Liz writes when asked to build a page (see generatedViews). */
+const TYPE_VIEW = 'view';
+/** A view Liz proposed, waiting for someone who may publish it (see generatedDrafts). */
+const TYPE_DRAFT = 'view-draft';
+/** An other widget, added as code by Liz or by an admin - a new kind of widget (see generatedWidgets). */
+const TYPE_WIDGET = 'widget';
 
 const HOME_CONFIG_NAME = 'templating-home';
 
@@ -50,8 +60,10 @@ export const PAGE_VIEWS = 'views';
 
 /** A ConfigMap as the management store hands it back: its fields, and `save`. */
 interface ConfigMapModel {
-  metadata: { name: string; labels?: Record<string, string> };
+  metadata: { name: string; labels?: Record<string, string>; resourceVersion?: string };
   data?: Record<string, string>;
+  /** Whether the person signed in may change it - from the links Rancher sends with it. */
+  canUpdate?: boolean;
   save(): Promise<unknown>;
 }
 
@@ -70,6 +82,13 @@ export interface ViewScopes {
   resolved: PageViews | null;
   hasGlobal: boolean;
   hasUser: boolean;
+  /**
+   * Views in ConfigMaps of their own, built by Liz: published to everyone, beside the organization's
+   * own (see generatedViews). Never part of `global`, so nothing written back to it copies them.
+   */
+  generated: View[];
+  /** Views Liz proposed, for those who may publish them (see generatedDrafts). */
+  drafts: View[];
 }
 
 // ---- reading ----------------------------------------------------------------------------------------
@@ -106,10 +125,12 @@ export async function fetchTemplatingConfigMaps(store: VuexStore): Promise<void>
     return;
   }
 
+  // Not forced, and not read again after the package's own writes: those land in the store through the
+  // models they save, and the store's watch brings anyone else's. Where Rancher pages ConfigMaps on the
+  // server, the read still goes out each time it is asked for.
   await store.dispatch('management/findLabelSelector', {
     type:     CONFIG_MAP,
     matching: { namespace: NAMESPACE, labelSelector: { matchLabels: { [LABEL_MARKER]: 'true' } } },
-    opt:      { force: true },
   }).catch(() => undefined);
 }
 
@@ -142,7 +163,397 @@ export function appliedViewScopes(getters: Getters, page: PageKey = PAGE_HOME): 
     resolved:  userApplied || globalApplied,
     hasGlobal: !!rawGlobal,
     hasUser:   !!rawUser,
+    generated: generatedViews(getters, page),
+    drafts:    generatedDrafts(getters, page),
   };
+}
+
+// ---- views built by Liz ---------------------------------------------------------------------------
+
+/** The id a view in a ConfigMap of its own has: the ConfigMap's name, so it is stable and says where it is. */
+export const GENERATED_VIEW_PREFIX = 'cm:';
+
+export const isGeneratedView = (id: string | null | undefined): boolean => !!id?.startsWith(GENERATED_VIEW_PREFIX);
+
+/**
+ * The views in ConfigMaps of their own, for one page - what Liz writes when asked to build a page.
+ *
+ * One small ConfigMap per view (labels: the marker, and type `view`; data: `page` and `view`, the
+ * view as JSON), rather than an edit of templating-home: an agent creates a resource, which is one
+ * tool call it gets right, instead of rewriting one large JSON string everyone's views live in. Each
+ * is normalized exactly as a stored view is, and shown as published - removing it from everyone
+ * deletes its ConfigMap (see deleteGeneratedView).
+ */
+function viewMaps(getters: Getters, page: PageKey, type = TYPE_VIEW): ConfigMapModel[] {
+  return (getters['management/all']?.(CONFIG_MAP) || [])
+    .filter((cm: ConfigMapModel & { metadata: { namespace?: string } }) => cm.metadata?.labels?.[LABEL_MARKER] === 'true' &&
+      cm.metadata?.labels?.[LABEL_TYPE] === type && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE) &&
+      (cm.data?.page || PAGE_HOME) === page);
+}
+
+/** A ConfigMap's view, read as a stored view is, under the id given */
+function viewOf(cm: ConfigMapModel, id: string): View | null {
+  const raw = parse(cm.data?.view) as Record<string, unknown>;
+  const [view] = migratePageViews({
+    views: [{
+      ...raw, id, widgets: withStableIds(raw.widgets, id)
+    }]
+  }).views;
+
+  return view || null;
+}
+
+export function generatedViews(getters: Getters, page: PageKey = PAGE_HOME): View[] {
+  return viewMaps(getters, page)
+    .flatMap((cm) => {
+      const view = viewOf(cm, `${ GENERATED_VIEW_PREFIX }${ cm.metadata.name }`);
+
+      return view ? [view] : [];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---- views Liz proposed ---------------------------------------------------------------------------
+
+/** The id of a view Liz proposed: its ConfigMap's name, as for her published views. */
+export const DRAFT_VIEW_PREFIX = 'draft:';
+
+export const isDraftView = (id: string | null | undefined): boolean => !!id?.startsWith(DRAFT_VIEW_PREFIX);
+
+/**
+ * What Liz proposed for a page, before anyone has approved it: ConfigMaps of type `view-draft`, each a
+ * view as her published ones are, and, for a change to one of them, `data.replaces` - the name of its
+ * ConfigMap. Shown only to those who may change the draft's ConfigMap, who are the ones who may
+ * publish a view; anyone else never sees one.
+ *
+ * Approving a new view makes the draft a published view where it is (see approveDraft); approving a
+ * change writes it into the view it replaces. Discarding deletes the draft.
+ */
+export function generatedDrafts(getters: Getters, page: PageKey = PAGE_HOME): View[] {
+  return viewMaps(getters, page, TYPE_DRAFT)
+    .filter((cm) => cm.canUpdate !== false)
+    .flatMap((cm) => {
+      const view = viewOf(cm, `${ DRAFT_VIEW_PREFIX }${ cm.metadata.name }`);
+      const replaces = cm.data?.replaces || '';
+
+      const version = cm.metadata.resourceVersion;
+      const draft = replaces ? { replaces, replacesName: viewNamed(getters, replaces) } : {};
+
+      return view ? [{ ...view, draft: version ? { ...draft, version } : draft }] : [];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The name of the published view in a ConfigMap of Liz's - what a change to it is shown against */
+function viewNamed(getters: Getters, cmName: string): string {
+  const cm = cmNamed(getters, cmName);
+
+  if (!cm || cm.metadata.labels?.[LABEL_TYPE] !== TYPE_VIEW) {
+    return '';
+  }
+
+  return viewOf(cm, cmName)?.name || cmName;
+}
+
+/** Why a draft could not be approved: it is gone, or the view it changes is. */
+export class DraftError extends Error {
+  constructor(public readonly reason: 'gone' | 'targetGone') {
+    super(reason);
+  }
+}
+
+/**
+ * Publish what Liz proposed. A new view: its ConfigMap becomes a published view, as one written by Liz
+ * before drafts. A change: the view it replaces takes the draft's, and the draft goes - for everyone, so
+ * a copy of her view published from the editor, which stands in for her ConfigMap under its id, goes too.
+ * Resolves to the id of the published view, to open it.
+ */
+export async function approveDraft(store: VuexStore, id: string): Promise<string> {
+  const name = id.slice(DRAFT_VIEW_PREFIX.length);
+  const draft = cmNamed(store.getters, name) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (!draft || draft.metadata.labels?.[LABEL_TYPE] !== TYPE_DRAFT) {
+    throw new DraftError('gone');
+  }
+
+  const replaces = draft.data?.replaces;
+
+  if (replaces) {
+    const target = cmNamed(store.getters, replaces);
+
+    if (!target || target.metadata.labels?.[LABEL_TYPE] !== TYPE_VIEW) {
+      throw new DraftError('targetGone');
+    }
+
+    // On a copy, so a write that fails leaves the published view - and the draft - as they were
+    const copy: ConfigMapModel = await store.dispatch('management/clone', { resource: target });
+
+    copy.data = { ...(copy.data || {}), view: draft.data?.view || '' };
+    await copy.save();
+
+    // Her ConfigMap shows again where a copy of it published from the editor stood in for it
+    const page = (target.data?.page || PAGE_HOME) as PageKey;
+    const standIn = `${ GENERATED_VIEW_PREFIX }${ replaces }`;
+    const org = appliedViewScopes(store.getters, page).global;
+
+    if (org?.views.some((p) => p.id === standIn)) {
+      const left: PageViews = { ...JSON.parse(JSON.stringify(org)), views: org.views.filter((p) => p.id !== standIn) };
+
+      await saveView(store, 'global', left.views.length ? left : null, page);
+    }
+    await draft.remove();
+
+    return standIn;
+  }
+
+  const copy: ConfigMapModel = await store.dispatch('management/clone', { resource: draft });
+
+  copy.metadata.labels = { ...(copy.metadata.labels || {}), [LABEL_TYPE]: TYPE_VIEW };
+  await copy.save();
+
+  return `${ GENERATED_VIEW_PREFIX }${ name }`;
+}
+
+/** Throw away what Liz proposed: its ConfigMap goes. */
+export async function discardDraft(store: VuexStore, id: string): Promise<void> {
+  const draft = cmNamed(store.getters, id.slice(DRAFT_VIEW_PREFIX.length)) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (draft && draft.metadata.labels?.[LABEL_TYPE] === TYPE_DRAFT) {
+    await draft.remove();
+  }
+}
+
+/**
+ * Ids for the widgets of a view in a ConfigMap of its own, where they have none - Liz and the examples
+ * leave them out. Made from the view and the widget's place, so they are the same every time the view
+ * is read: a new id each read would make the page take them for new widgets and draw them all again,
+ * every time the stored views are read - which is whenever any of this package's ConfigMaps changes.
+ */
+function withStableIds(widgets: unknown, prefix: string): unknown {
+  if (!Array.isArray(widgets)) {
+    return widgets;
+  }
+
+  return widgets.map((node, i) => {
+    if (!node || typeof node !== 'object') {
+      return node;
+    }
+
+    const n = node as Record<string, unknown>;
+    const nodeId = typeof n.id === 'string' && n.id ? n.id : `${ prefix }-w${ i }`;
+    const widget = n.widget && typeof n.widget === 'object' ? n.widget as Record<string, unknown> : null;
+
+    // A Tabs widget's tabs, and the widgets in them, get theirs the same way
+    const tabs = Array.isArray(widget?.tabs) ? (widget?.tabs as Record<string, unknown>[]).map((tab, t) => ({
+      ...tab,
+      id:      typeof tab?.id === 'string' && tab.id ? tab.id : `${ nodeId }-t${ t }`,
+      widgets: withStableIds(tab?.widgets, `${ nodeId }-t${ t }`),
+    })) : undefined;
+
+    return {
+      ...n, id: nodeId, ...(widget && tabs ? { widget: { ...widget, tabs } } : {})
+    };
+  });
+}
+
+/** Take a view Liz built away from everyone: its ConfigMap goes. */
+export async function deleteGeneratedView(store: VuexStore, id: string): Promise<void> {
+  const cm = cmNamed(store.getters, id.slice(GENERATED_VIEW_PREFIX.length)) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (cm) {
+    await cm.remove();
+  }
+}
+
+// ---- other widgets: code, by Liz or an admin ----------------------------------------------------
+
+/** An other widget - its code added by Liz or by an admin - from a ConfigMap of its own. */
+export interface GeneratedWidget {
+  /** The ConfigMap's name - what a view's widget names it by. */
+  name: string;
+  displayName: string;
+  description: string;
+  /** The widget, as a Vue single-file component. */
+  source: string;
+  created: string;
+  /** Which version of its ConfigMap this is: a change gives it a new one. */
+  version: string;
+}
+
+/**
+ * The other widgets: ConfigMaps labelled type `widget`, each with `displayName`, `description` and
+ * `component` (a Vue single-file component). Their code only runs once an admin approves it (see
+ * widgetApprovals).
+ */
+export function generatedWidgets(getters: Getters): GeneratedWidget[] {
+  return (getters['management/all']?.(CONFIG_MAP) || [])
+    .filter((cm: ConfigMapModel & { metadata: { namespace?: string } }) => cm.metadata?.labels?.[LABEL_MARKER] === 'true' &&
+      cm.metadata?.labels?.[LABEL_TYPE] === TYPE_WIDGET && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE))
+    .map((cm: ConfigMapModel & { metadata: { creationTimestamp?: string, resourceVersion?: string } }) => ({
+      name:        cm.metadata.name,
+      displayName: cm.data?.displayName || cm.metadata.name,
+      description: cm.data?.description || '',
+      source:      cm.data?.component || '',
+      created:     cm.metadata.creationTimestamp || '',
+      version:     cm.metadata.resourceVersion || '',
+    }))
+    .sort((a: GeneratedWidget, b: GeneratedWidget) => a.displayName.localeCompare(b.displayName));
+}
+
+/** The time of the latest write Kubernetes recorded for an object, if it kept any. */
+function lastWrite(metadata: { managedFields?: { time?: string }[] } | undefined): string {
+  return (metadata?.managedFields || []).map((f) => f.time || '').filter(Boolean).sort().pop() || '';
+}
+
+/**
+ * When each widget last changed, by Liz or by hand: the latest write Kubernetes recorded for its ConfigMap,
+ * by name. Read one widget at a time with the records, which the shell's reads leave out. A plain request,
+ * not a store action: a forced find of one ConfigMap makes the store drop the page of ConfigMaps it keeps
+ * up to date, so nothing more of them arrived while Settings was open. A widget that could not be read is
+ * not in it. Never rejects.
+ */
+export async function fetchWidgetChanges(store: VuexStore, names: string[]): Promise<Record<string, string>> {
+  const changed: Record<string, string> = {};
+
+  await Promise.all(names.map(async(name) => {
+    try {
+      const cm = await store.dispatch('management/request', { url: `/v1/${ CONFIG_MAP }s/${ NAMESPACE }/${ name }` });
+      const at = lastWrite(cm?.metadata);
+
+      if (at) {
+        changed[name] = at;
+      }
+    } catch (e) {}
+  }));
+
+  return changed;
+}
+
+/** An approval of a widget's code: exactly which code (the SHA-256 of its source), who approved it and when. */
+export interface WidgetApproval {
+  hash: string;
+  /** The approver's username, or user id. */
+  by: string;
+  /** When, as an ISO date. */
+  at: string;
+}
+
+/**
+ * WHERE APPROVALS ARE KEPT: a Rancher setting, not a ConfigMap. Every signed-in user can read settings,
+ * so every browser can check a widget's approval; only admins - and anyone given the right to manage
+ * settings - can write them. A ConfigMap beside the widgets would not do: Rancher's default project-member
+ * role can write ConfigMaps in the local cluster's Default project, where `default` is, and approved code
+ * runs in Rancher for everyone who opens a page with it, with that person's access.
+ *
+ * Approvals kept in templating-config before this no longer count, for that reason: those widgets wait
+ * to be approved again.
+ */
+export const APPROVALS_SETTING = 'ui-configurable-views-widget-approvals';
+
+interface SettingModel {
+  value?: string;
+  canUpdate?: boolean;
+  save(): Promise<unknown>;
+}
+
+const approvalsSetting = (getters: Getters): SettingModel | undefined => getters['management/byId']?.(MANAGEMENT.SETTING, APPROVALS_SETTING);
+
+/**
+ * Read the approvals again. The shell loads every setting when Rancher opens, without watching them, so
+ * an approval made since - by another admin - shows once this is read. Never rejects: no setting yet
+ * means nothing is approved.
+ */
+export async function fetchWidgetApprovals(store: VuexStore): Promise<void> {
+  await store.dispatch('management/find', {
+    type: MANAGEMENT.SETTING, id: APPROVALS_SETTING, opt: { force: true }
+  }).catch(() => undefined);
+}
+
+/**
+ * Which widgets' code was approved, and exactly which code: widget name -> its approval. A widget runs
+ * only while its source still has the approved hash, so any change - by Liz or by hand - needs
+ * approving again.
+ */
+export function widgetApprovals(getters: Getters): Record<string, WidgetApproval> {
+  const parsed = parse(approvalsSetting(getters)?.value) as Record<string, unknown>;
+  const out: Record<string, WidgetApproval> = {};
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+  for (const [name, value] of Object.entries(parsed)) {
+    const v = (value && typeof value === 'object' ? value : {}) as Partial<WidgetApproval>;
+
+    if (text(v.hash)) {
+      out[name] = {
+        hash: text(v.hash), by: text(v.by), at: text(v.at)
+      };
+    }
+  }
+
+  return out;
+}
+
+/** Approve a widget's code - the source with this hash - as the person signed in, or revoke the approval (null). */
+export async function setWidgetApproval(store: VuexStore, name: string, hash: string | null): Promise<void> {
+  const approvals = { ...widgetApprovals(store.getters) };
+
+  if (hash) {
+    const user = store.getters['auth/user'] as { username?: string; id?: string } | null;
+
+    approvals[name] = {
+      hash, by: user?.username || user?.id || '', at: new Date().toISOString()
+    };
+  } else {
+    delete approvals[name];
+  }
+
+  const value = JSON.stringify(approvals);
+  const existing = approvalsSetting(store.getters);
+
+  if (existing) {
+    // Changed on a copy: a write that fails leaves the stored approvals - and what the page shows - as
+    // they were, rather than showing an approval that was never saved
+    const copy: SettingModel = await store.dispatch('management/clone', { resource: existing });
+
+    copy.value = value;
+    await copy.save();
+
+    return;
+  }
+
+  const setting: SettingModel = await store.dispatch('management/create', {
+    type: MANAGEMENT.SETTING, metadata: { name: APPROVALS_SETTING }, value
+  });
+
+  await setting.save();
+}
+
+/**
+ * Whether the person signed in can approve widgets: change the approvals setting - or, before there is
+ * one, create settings. The same RBAC the write itself meets, so nobody is offered buttons that can only
+ * fail.
+ */
+export function canApproveWidgets(getters: Getters): boolean {
+  const setting = approvalsSetting(getters);
+
+  if (setting) {
+    return !!setting.canUpdate;
+  }
+
+  const schema = getters['management/schemaFor']?.(MANAGEMENT.SETTING) as { collectionMethods?: string[] } | undefined;
+
+  return !!schema?.collectionMethods?.some((method) => method.toUpperCase() === 'POST');
+}
+
+/** Remove an other widget: its ConfigMap goes, and its approval with it. */
+export async function deleteGeneratedWidget(store: VuexStore, name: string): Promise<void> {
+  const cm = cmNamed(store.getters, name) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
+
+  if (widgetApprovals(store.getters)[name]) {
+    await setWidgetApproval(store, name, null);
+  }
+  if (cm) {
+    await cm.remove();
+  }
 }
 
 // ---- the on/off switch ------------------------------------------------------------------------------
