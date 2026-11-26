@@ -349,7 +349,7 @@ export async function deleteGeneratedView(store: VuexStore, id: string): Promise
   }
 }
 
-// ---- widgets Liz wrote --------------------------------------------------------------------------
+// ---- other widgets: code, by Liz or an admin ----------------------------------------------------
 
 /** A widget whose code Liz wrote, from a ConfigMap of its own. */
 export interface GeneratedWidget {
@@ -360,6 +360,13 @@ export interface GeneratedWidget {
   /** The widget, as a Vue single-file component. */
   source: string;
   created: string;
+  /** When it last changed, by Liz or by hand: the latest write Kubernetes recorded, else when it was created. */
+  updated: string;
+}
+
+/** The time of the latest write Kubernetes recorded for an object, if it kept any. */
+function lastWrite(metadata: { managedFields?: { time?: string }[] }): string {
+  return (metadata.managedFields || []).map((f) => f.time || '').filter(Boolean).sort().pop() || '';
 }
 
 /**
@@ -371,12 +378,13 @@ export function generatedWidgets(getters: Getters): GeneratedWidget[] {
   return (getters['management/all']?.(CONFIG_MAP) || [])
     .filter((cm: ConfigMapModel & { metadata: { namespace?: string } }) => cm.metadata?.labels?.[LABEL_MARKER] === 'true' &&
       cm.metadata?.labels?.[LABEL_TYPE] === TYPE_WIDGET && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE))
-    .map((cm: ConfigMapModel & { metadata: { creationTimestamp?: string } }) => ({
+    .map((cm: ConfigMapModel & { metadata: { creationTimestamp?: string, managedFields?: { time?: string }[] } }) => ({
       name:        cm.metadata.name,
       displayName: cm.data?.displayName || cm.metadata.name,
       description: cm.data?.description || '',
       source:      cm.data?.component || '',
       created:     cm.metadata.creationTimestamp || '',
+      updated:     lastWrite(cm.metadata) || cm.metadata.creationTimestamp || '',
     }))
     .sort((a: GeneratedWidget, b: GeneratedWidget) => a.displayName.localeCompare(b.displayName));
 }

@@ -176,7 +176,7 @@ const spacings = SPACING_PRESETS;
 const tileText = (entry: CatalogEntry) => `${ entryLabel(entry, t) } ${ entryDesc(entry, t) }`;
 const blocks = computed(() => searchCatalog(BUILDING_BLOCKS, search.value, tileText));
 const readyMade = computed(() => searchCatalog(READY_MADE, search.value, tileText));
-// The widgets Liz wrote that an admin approved - new kinds of widget, dropped like any other
+// The other widgets - added as code, by Liz or by an admin - that an admin approved - new kinds of widget, dropped like any other
 // Only those whose code is still the code approved: one changed since would only say, once added, that
 // it needs approving again
 const lizWidgets = computed(() => generatedWidgets(store.getters));
@@ -361,25 +361,6 @@ function valueOf(ev: Event): string {
           </p>
         </div>
 
-        <template v-if="generated.length">
-          <h4 class="evs__group">
-            {{ t('configurableViews.sidebar.generated') }}
-          </h4>
-          <p class="evs__hint">
-            {{ t('configurableViews.sidebar.generatedHint') }}
-          </p>
-          <div class="evs__tiles">
-            <CatalogTile
-              v-for="entry in generated"
-              :key="entry.id"
-              :entry="entry"
-              @dragstart="(e, ev) => $emit('drag-start', e, ev)"
-              @dragend="$emit('drag-end')"
-              @add="$emit('add', $event)"
-            />
-          </div>
-        </template>
-
         <h4 class="evs__group">
           {{ t('configurableViews.sidebar.readyMade') }}
         </h4>
@@ -402,6 +383,25 @@ function valueOf(ev: Event): string {
             {{ t('configurableViews.sidebar.noReadyMade', { query: search }) }}
           </p>
         </div>
+
+        <template v-if="generated.length">
+          <h4 class="evs__group">
+            {{ t('configurableViews.sidebar.generated') }}
+          </h4>
+          <p class="evs__hint">
+            {{ t('configurableViews.sidebar.generatedHint') }}
+          </p>
+          <div class="evs__tiles">
+            <CatalogTile
+              v-for="entry in generated"
+              :key="entry.id"
+              :entry="entry"
+              @dragstart="(e, ev) => $emit('drag-start', e, ev)"
+              @dragend="$emit('drag-end')"
+              @add="$emit('add', $event)"
+            />
+          </div>
+        </template>
       </template>
 
       <!-- ---- LAYOUT ---- -->

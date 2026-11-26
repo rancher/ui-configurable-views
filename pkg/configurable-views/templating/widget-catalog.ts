@@ -41,7 +41,7 @@ export interface CatalogEntry {
 export const entryLabel = (entry: CatalogEntry, t: (key: string) => string): string => entry.label || t(entry.labelKey);
 export const entryDesc = (entry: CatalogEntry, t: (key: string) => string): string => entry.desc ?? t(entry.descKey);
 
-/** The tiles for the widgets Liz wrote that an admin approved. */
+/** The tiles for the other widgets (added as code, by Liz or by an admin) that an admin approved. */
 export function generatedEntries(widgets: { name: string; displayName: string; description: string }[], approvals: Record<string, unknown>): CatalogEntry[] {
   return widgets.filter((w) => approvals[w.name]).map((w) => ({
     id:       `generated:${ w.name }`,

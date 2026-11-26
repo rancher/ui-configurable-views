@@ -31,7 +31,7 @@ jest.mock('@pkg/configurable-views/templating/widget-hash', () => ({ widgetHash:
 jest.mock('@pkg/configurable-views/composables/useConfirm', () => ({ useConfirm: () => mockState.confirm }));
 jest.mock('@shell/apis', () => ({ useShell: () => ({ notification: { send: jest.fn() } }) }));
 
-type Widget = { name: string; displayName: string; description: string; source: string; created: string };
+type Widget = { name: string; displayName: string; description: string; source: string; created: string; updated?: string };
 const { mockStored } = jest.requireMock('@pkg/configurable-views/templating/template-engine') as {
   mockStored: { widgets: { value: Widget[] }; approvals: { value: Record<string, { hash: string; by: string; at: string }> } };
 };
@@ -113,6 +113,23 @@ describe('the widgets Liz wrote, on Settings', () => {
 
     expect(button(wrapper, 'approved-by').text()).toContain('configurableViews.generatedAdmin.approvedBy');
     expect(button(wrapper, 'approve').exists()).toBe(false);
+  });
+
+  it('says when it was created, and when it last changed if it did since', async() => {
+    mockStored.widgets.value = [{
+      ...widget('<p>one</p>'), created: '2026-11-01T10:00:00Z', updated: '2026-11-20T08:30:00Z'
+    }];
+    const changed = await mountAdmin();
+
+    expect(button(changed, 'dates').text()).toContain('configurableViews.generatedAdmin.created');
+    expect(button(changed, 'dates').text()).toContain('configurableViews.generatedAdmin.updated');
+
+    mockStored.widgets.value = [{
+      ...widget('<p>one</p>'), created: '2026-11-01T10:00:00Z', updated: '2026-11-01T10:00:00Z'
+    }];
+    const untouched = await mountAdmin();
+
+    expect(button(untouched, 'dates').text()).not.toContain('configurableViews.generatedAdmin.updated');
   });
 
   it('asks before deleting, and deletes nothing when the answer is no', async() => {

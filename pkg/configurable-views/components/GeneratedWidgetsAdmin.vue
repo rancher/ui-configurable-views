@@ -14,7 +14,7 @@ import { reviewWidget } from '../templating/widget-review';
 import { useConfirm } from '../composables/useConfirm';
 import { useWidgetHashes } from '../composables/useWidgetHashes';
 
-// The widgets Liz wrote, and the gate in front of them: an admin reads each one's code and approves
+// The other widgets - added as code, by Liz or by an admin - and the gate in front of them: an admin reads each one's code and approves
 // it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
 // is what was read - a change sends it back here. Revoking stops it everywhere at once.
 //
@@ -163,6 +163,16 @@ async function remove(name: string): Promise<void> {
         <div class="gwa__name">
           <strong>{{ w.displayName }}</strong>
           <span class="text-muted">{{ w.name }}</span>
+          <span
+            v-if="w.created"
+            class="text-muted"
+            :data-testid="`generated-widget-dates-${ w.name }`"
+          >
+            {{ t('configurableViews.generatedAdmin.created') }} <DateFormatter :value="w.created" />
+            <template v-if="w.updated && w.updated !== w.created">
+              · {{ t('configurableViews.generatedAdmin.updated') }} <DateFormatter :value="w.updated" />
+            </template>
+          </span>
         </div>
         <div class="gwa__status">
           <BadgeState

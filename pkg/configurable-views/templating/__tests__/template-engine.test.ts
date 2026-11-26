@@ -379,6 +379,23 @@ describe('widgets Liz wrote', () => {
     ]);
   });
 
+  it('says when each was created, and when it last changed: the latest write Kubernetes recorded', () => {
+    const changed = widget('liz-widget-a', { component: '<p />' });
+    const untouched = widget('liz-widget-b', { component: '<p />' });
+
+    Object.assign(changed.metadata, {
+      creationTimestamp: '2026-11-01T10:00:00Z',
+      managedFields:     [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }],
+    });
+    Object.assign(untouched.metadata, { creationTimestamp: '2026-11-02T10:00:00Z' });
+    const { store } = storeWith([changed, untouched]);
+
+    expect(generatedWidgets(store.getters).map((w) => [w.name, w.created, w.updated])).toStrictEqual([
+      ['liz-widget-a', '2026-11-01T10:00:00Z', '2026-11-20T08:30:00Z'],
+      ['liz-widget-b', '2026-11-02T10:00:00Z', '2026-11-02T10:00:00Z'],
+    ]);
+  });
+
   describe('approvals', () => {
     const SETTING = 'management.cattle.io.setting';
 
