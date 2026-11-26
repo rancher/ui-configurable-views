@@ -78,7 +78,7 @@ const grid = ref<InstanceType<typeof WidgetGrid> | null>(null);
 const pageViews = usePageViews(props, store, t);
 const {
   loaded, editing, activeViewId, selectedNodeId, startedFrom, settingsAnchor, saving, drawerOpen, error,
-  templatingEnabled, defaultViewId, views, drafts, publishedIds, changedIds, activeView, activeDraft, isNewView, activeIsStock, widgets, gap, dirty,
+  templatingEnabled, defaultViewId, views, drafts, publishedIds, changedIds, outdatedIds, orgViews, activeView, activeDraft, isNewView, activeIsStock, widgets, gap, dirty,
 } = pageViews;
 
 const {
@@ -87,7 +87,22 @@ const {
 
 const {
   renameStoredView, duplicateView, setDefaultView, reorderViews, publishView, unpublishView, deleteView, approveDraftView, discardDraftView,
+  takePublishedView, keepOwnCopy,
 } = useViewActions(pageViews, props, store, t, confirm, bar, leaveEdit);
+
+// Your copy of a published view that changed since you made it (or that does not say): the published
+// view's name, and whether the copy knows what it showed then. Not while editing.
+const outdatedCopy = computed(() => {
+  const view = activeView.value;
+
+  if (editing.value || !view?.from || !outdatedIds.value.includes(view.id)) {
+    return null;
+  }
+
+  return {
+    id: view.id, name: orgViews.value.find((p) => p.id === view.from)?.name || view.name, known: !!view.fromHash
+  };
+});
 
 // A change Liz proposed to a view of hers that is gone since: there is nothing left to replace, so it
 // can only be thrown away.
@@ -265,6 +280,35 @@ const barListeners = {
             @click="discardDraftView(activeDraft.id)"
           >
             {{ t('configurableViews.drafts.discard.action') }}
+          </button>
+        </span>
+      </div>
+    </Banner>
+
+    <Banner
+      v-if="outdatedCopy"
+      class="ai-home__draft"
+      color="info"
+      data-testid="configurable-views-outdated-banner"
+    >
+      <div class="ai-home__draft-body">
+        <span>{{ t(`configurableViews.outdated.${ outdatedCopy.known ? 'changed' : 'differs' }`, { name: outdatedCopy.name }) }}</span>
+        <span class="ai-home__draft-actions">
+          <button
+            class="btn btn-sm role-primary"
+            :disabled="saving"
+            data-testid="configurable-views-outdated-take"
+            @click="takePublishedView(outdatedCopy.id)"
+          >
+            {{ t('configurableViews.outdated.take') }}
+          </button>
+          <button
+            class="btn btn-sm role-secondary"
+            :disabled="saving"
+            data-testid="configurable-views-outdated-keep"
+            @click="keepOwnCopy(outdatedCopy.id)"
+          >
+            {{ t('configurableViews.outdated.keep') }}
           </button>
         </span>
       </div>

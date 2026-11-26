@@ -63,6 +63,7 @@ configurableViews:
     publish:
       title: Publish to the organization?
       body: "“{name}” becomes an organization template: everyone sees it on their {page}, and can fork their own copy of it."
+      bodyOutdated: "The published “{name}” was changed for everyone since you made your copy. Publishing your copy replaces those changes, for everyone on their {page}."
       action: Publish
     unpublish:
       title: Unpublish this view?
@@ -167,6 +168,11 @@ configurableViews:
       state: By status
       type: By resource type
       namespace: By namespace
+  outdated:
+    changed: "“{name}” was changed for everyone since you made your copy of it, so you do not see those changes."
+    differs: "Your copy of “{name}” is not what is published for everyone, which may have changed since you made it."
+    take: Use the Published View
+    keep: Keep My Copy
   drafts:
     label: Proposed by Liz
     pill: Proposed

@@ -24,9 +24,61 @@ export function viewContent(view: View): string {
 
   delete copy.id;
   delete copy.from;
+  delete copy.fromHash;
   delete copy.org;
 
   return JSON.stringify(copy);
+}
+
+/** A short fingerprint of what a view shows (FNV-1a over viewContent): what a copy keeps of its source. */
+export function contentHash(view: View): string {
+  const text = viewContent(view);
+  let hash = 0x811c9dc5;
+
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/** Your copy of a published view, as it is made: remembering what that view showed. */
+export function copyOf(view: View, id = newId('view')): View {
+  const copy: View = {
+    ...clone(view), id, from: view.id, fromHash: contentHash(view)
+  };
+
+  delete copy.org;
+
+  return copy;
+}
+
+/**
+ * Your stored views, with each copy of a published view that you have not changed following that view:
+ * a copy still showing what the published view showed when it was made takes what it shows now, under
+ * its own id - so a default, a place in the bar and an open tab stay put. A copy you changed stays
+ * yours, and the page says when the published view changed under it (see outdatedIds).
+ */
+export function followPublished(set: PageViews | null, published: View[]): PageViews | null {
+  if (!set) {
+    return set;
+  }
+
+  const sources = new Map(published.map((p) => [p.id, p]));
+  let followed = false;
+  const views = set.views.map((view) => {
+    const source = view.from ? sources.get(view.from) : undefined;
+
+    if (!source || !view.fromHash || contentHash(source) === view.fromHash || contentHash(view) !== view.fromHash) {
+      return view;
+    }
+    followed = true;
+
+    return copyOf(source, view.id);
+  });
+
+  return followed ? { ...set, views } : set;
 }
 
 /**
@@ -82,8 +134,6 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   const scopes = computed(() => appliedViewScopes(store.getters, props.page));
 
-  // Your saved views (what the editor writes), and the ones an admin published for the organization.
-  const userSet = computed<PageViews | null>(() => optimistic.value || scopes.value.user);
   // The organization's views, and after them the ones Liz built - unless the organization's already
   // has one by that id (a copy of Liz's view published back), which then stands in for it.
   const orgViews = computed(() => {
@@ -93,11 +143,24 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     return [...own, ...scopes.value.generated.filter((p) => !ids.has(p.id))];
   });
   const orgIds = computed(() => new Set(orgViews.value.map((p) => p.id)));
+  // Your saved views (what the editor writes), with the copies you have not changed following the
+  // published views they came from (see followPublished).
+  const userSet = computed<PageViews | null>(() => followPublished(optimistic.value || scopes.value.user, orgViews.value));
 
   /** A working copy of your stored views, for an action to change and write back. */
   const userDraft = (): PageViews => (userSet.value ? clone(userSet.value) : { views: [] });
 
-  const defaultViewId = computed(() => userSet.value?.defaultViewId || '');
+  /**
+   * The view a set opens on. A default can name a published view, which a copy of it then stands in for:
+   * making a view your default does not copy it, so it keeps following the published view.
+   */
+  function resolveDefault(set: PageViews | null | undefined): string {
+    const id = set?.defaultViewId || '';
+
+    return (id && orgIds.value.has(id) && set?.views.find((p) => p.from === id)?.id) || id;
+  }
+
+  const defaultViewId = computed(() => resolveDefault(editing.value ? working.value : userSet.value));
 
   // Every view in the bar, in the order you dragged them into: the organization's, then your own,
   // until you do. The view the page opens on leads.
@@ -116,7 +179,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     // Rancher's own page is always one of the tabs.
     const list = all.some(isStockView) ? all : [builtInStockView(t('configurableViews.page.stockName')), ...all];
 
-    return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), defaultViewId.value);
+    return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), resolveDefault(set));
   });
 
   // What Liz proposed for this page, for those who may publish it (see generatedDrafts): tabs of their
@@ -132,6 +195,30 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
     return views.value.filter((p) => !p.org && p.from && published.has(p.from) && published.get(p.from) !== viewContent(p)).map((p) => p.id);
   });
+
+  /**
+   * Your changed copies whose published view changed since they were made - by Liz, or another publish
+   * - or that do not say what it showed then (copies made before they did). Those are not your changes
+   * alone: the page asks whether to take the published view or keep yours.
+   */
+  const outdatedIds = computed(() => {
+    const published = new Map(orgViews.value.map((p) => [p.id, contentHash(p)]));
+
+    return changedIds.value.filter((id) => {
+      const view = views.value.find((p) => p.id === id);
+
+      return !!view?.from && view.fromHash !== published.get(view.from);
+    });
+  });
+
+  /** A view's id as the bar has it: a published view you have a copy of is your copy. */
+  function viewIdFor(id: string | null): string | null {
+    if (!id || views.value.some((p) => p.id === id)) {
+      return id;
+    }
+
+    return views.value.find((p) => p.from === id && orgIds.value.has(id))?.id || id;
+  }
 
   /** A view of the bar, or a draft: anything that can be open */
   const findView = (id: string | null): View | undefined => (id ? views.value.find((p) => p.id === id) || drafts.value.find((p) => p.id === id) : undefined);
@@ -200,7 +287,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   /** Move to a view on purpose — and remember that it was on purpose. */
   function setActiveView(id: string | null): void {
-    activeViewId.value = id;
+    activeViewId.value = viewIdFor(id);
     pinnedView.value = true;
     selectedNodeId.value = null;
   }
@@ -224,7 +311,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     }
 
     const published = wanted.startsWith(DRAFT_VIEW_PREFIX) ? `${ GENERATED_VIEW_PREFIX }${ wanted.slice(DRAFT_VIEW_PREFIX.length) }` : '';
-    const id = [wanted, published].find((candidate) => candidate && findView(candidate));
+    const id = [wanted, published].map(viewIdFor).find((candidate) => candidate && findView(candidate));
 
     if (!id) {
       return;
@@ -287,11 +374,8 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
       return view.id;
     }
 
-    const fork: View = {
-      ...clone(view), id: newId('view'), from: view.id
-    };
+    const fork = copyOf(view);
 
-    delete fork.org;
     draft.views.push(fork);
 
     return fork.id;
@@ -322,6 +406,8 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     drafts,
     publishedIds,
     changedIds,
+    outdatedIds,
+    viewIdFor,
     activeView,
     activeDraft,
     isNewView,

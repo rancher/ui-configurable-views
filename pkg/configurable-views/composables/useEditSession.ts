@@ -4,7 +4,7 @@ import type { I18n } from '@shell/composables/useI18n';
 import { saveView, type PageKey } from '../templating/template-engine';
 import { DEFAULT_GAP, newId, newLayoutView, isStockView } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
-import { clone, viewContent, type PageViewsState } from './usePageViews';
+import { clone, copyOf, viewContent, type PageViewsState } from './usePageViews';
 import type { ConfirmOptions } from './useConfirm';
 import type { LayoutView, View, PageViews } from '../templating/types';
 
@@ -44,11 +44,8 @@ export function useEditSession(
     working.value = draft;
 
     if (active?.org) {
-      const fork: View = {
-        ...clone(active), id: newId('view'), from: active.id
-      };
+      const fork = copyOf(active);
 
-      delete fork.org;
       draft.views.push(fork);
       pageViews.setActiveView(fork.id);
     } else if (seedFirst && !draft.views.length) {
@@ -95,13 +92,14 @@ export function useEditSession(
    */
   function pruneUntouchedForks(draft: PageViews): void {
     const sources = new Map(orgViews.value.map((p) => [p.id, viewContent(p)]));
-    const dropped = new Set<string>();
+    // Each dropped copy, and the published view it mirrored
+    const dropped = new Map<string, string>();
 
     draft.views = draft.views.filter((view) => {
       const untouched = !!view.from && sources.get(view.from) === viewContent(view);
 
       if (untouched) {
-        dropped.add(view.id);
+        dropped.set(view.id, view.from as string);
       }
 
       return !untouched;
@@ -112,8 +110,9 @@ export function useEditSession(
       activeViewId.value = null;
       pinnedView.value = false;
     }
+    // A default that named one names the published view instead, which it stood in for
     if (draft.defaultViewId && dropped.has(draft.defaultViewId)) {
-      delete draft.defaultViewId;
+      draft.defaultViewId = dropped.get(draft.defaultViewId);
     }
   }
 
@@ -159,6 +158,7 @@ export function useEditSession(
     };
 
     delete copy.from;
+    delete copy.fromHash;
 
     // The original goes back to how it was saved; the copy carries the edits.
     const original = (JSON.parse(savedBaseline.value) as PageViews).views.find((p) => p.id === view.id);

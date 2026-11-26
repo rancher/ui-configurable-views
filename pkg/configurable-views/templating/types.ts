@@ -172,6 +172,11 @@ export interface LayoutView {
   org?: boolean;
   /** The published view this one was forked from. */
   from?: string;
+  /**
+   * What that published view showed when this copy was made (see contentHash). A copy still showing it
+   * follows the published view; one changed since is the person's own.
+   */
+  fromHash?: string;
   /** Liz proposed it, and it waits for approval. */
   draft?: DraftInfo;
 }
@@ -183,6 +188,7 @@ export interface StockView {
   kind: 'stock';
   org?: boolean;
   from?: string;
+  fromHash?: string;
   draft?: DraftInfo;
 }
 

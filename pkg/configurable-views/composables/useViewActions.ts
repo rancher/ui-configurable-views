@@ -8,7 +8,7 @@ import {
   newId, newLayoutView, isStockView, BUILT_IN_STOCK_ID, orderKeyOf
 } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
-import { clone, type PageViewsState } from './usePageViews';
+import { clone, contentHash, copyOf, type PageViewsState } from './usePageViews';
 import type { ConfirmOptions } from './useConfirm';
 import type { View, PageViews } from '../templating/types';
 
@@ -36,7 +36,7 @@ export function useViewActions(
   leaveEdit: () => Promise<void>,
 ) {
   const {
-    editing, activeViewId, pinnedView, saving, error, scopes, orgIds, views,
+    editing, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
   } = pageViews;
 
   /** Renamed in place on its tab. */
@@ -77,6 +77,7 @@ export function useViewActions(
 
     delete copy.org;
     delete copy.from;
+    delete copy.fromHash;
     draft.views.push(copy);
 
     await pageViews.persist(draft, copy.id);
@@ -84,7 +85,11 @@ export function useViewActions(
     bar.value?.openRename(copy.id);
   }
 
-  /** Your default is the view the page opens on. Picking Rancher's own page is how to go back to none. */
+  /**
+   * Your default is the view the page opens on. Picking Rancher's own page is how to go back to none.
+   * A published view is not copied for it: your default names the published view, so it keeps following
+   * it - and your copy of it, while you have one, stands in for it.
+   */
   async function setDefaultView(id: string): Promise<void> {
     const view = pageViews.viewById(id);
 
@@ -101,10 +106,8 @@ export function useViewActions(
       return;
     }
 
-    const ownId = pageViews.ownCopy(draft, view);
-
-    draft.defaultViewId = ownId;
-    await pageViews.persist(draft, activeViewId.value === id ? ownId : activeViewId.value);
+    draft.defaultViewId = view.from && orgIds.value.has(view.from) ? view.from : view.id;
+    await pageViews.persist(draft, activeViewId.value);
   }
 
   /** The order the tabs were dragged into, by the key each view keeps its place by. */
@@ -126,11 +129,13 @@ export function useViewActions(
       return;
     }
 
+    // What it shows is what was just published
     if (editing.value) {
       const view = pageViews.workingView();
 
       if (view) {
         view.from = publishedId;
+        view.fromHash = contentHash(view);
       }
 
       return;
@@ -141,6 +146,7 @@ export function useViewActions(
 
     if (draft && mine) {
       mine.from = publishedId;
+      mine.fromHash = contentHash(mine);
       await saveView(store, 'user', draft, props.page);
     }
   }
@@ -152,9 +158,12 @@ export function useViewActions(
   async function publishView(id: string): Promise<void> {
     const source = editing.value && id === activeViewId.value ? pageViews.workingView() : pageViews.viewById(id);
 
+    // A copy whose published view changed since it was made would put those changes back as they were
+    const body = source && outdatedIds.value.includes(source.id) ? 'bodyOutdated' : 'body';
+
     if (!source || isStockView(source) || !await confirm({
       title:  t('configurableViews.page.publish.title'),
-      body:   t('configurableViews.page.publish.body', { name: source.name, page: props.title }, true),
+      body:   t(`configurableViews.page.publish.${ body }`, { name: source.name, page: props.title }, true),
       action: t('configurableViews.page.publish.action'),
     })) {
       return;
@@ -380,7 +389,48 @@ export function useViewActions(
     }
   }
 
+  // ---- your copy, when the published view changed under it ----
+
+  /** Your copy and the published view it came from, when it is one of yours that is out of date. */
+  function outdated(id: string): { draft: PageViews, mine: View, source: View } | null {
+    const draft = pageViews.userDraft();
+    const mine = draft.views.find((p) => p.id === id);
+    const source = mine?.from ? orgViews.value.find((p) => p.id === mine.from) : undefined;
+
+    return mine && source && outdatedIds.value.includes(id) ? {
+      draft, mine, source
+    } : null;
+  }
+
+  /** Take the published view: your copy shows it again, and follows it from now on. Same tab, same place. */
+  async function takePublishedView(id: string): Promise<void> {
+    const found = outdated(id);
+
+    if (!found) {
+      return;
+    }
+
+    const { draft, mine, source } = found;
+
+    draft.views.splice(draft.views.indexOf(mine), 1, copyOf(source, mine.id));
+    await pageViews.persist(draft, activeViewId.value);
+  }
+
+  /** Keep your copy: it is yours, as it is, and publishing it is publishing your changes. */
+  async function keepOwnCopy(id: string): Promise<void> {
+    const found = outdated(id);
+
+    if (!found) {
+      return;
+    }
+
+    found.mine.fromHash = contentHash(found.source);
+    await pageViews.persist(found.draft, activeViewId.value);
+  }
+
   return {
+    takePublishedView,
+    keepOwnCopy,
     renameStoredView,
     duplicateView,
     setDefaultView,

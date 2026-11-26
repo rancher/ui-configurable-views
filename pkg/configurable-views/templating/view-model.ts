@@ -546,6 +546,10 @@ function normalizeView(view: Loose): View {
   if (view.from) {
     out.from = str(view.from);
   }
+  // ...and what it showed then, which decides whether the copy still follows it.
+  if (view.fromHash) {
+    out.fromHash = str(view.fromHash);
+  }
 
   return out;
 }
@@ -574,8 +578,9 @@ export function migratePageViews(value: unknown): PageViews {
     const out: PageViews = { views };
     const defaultId = str(source?.defaultViewId);
 
-    // Which view opens first. Dropped when it names a view that no longer exists.
-    if (defaultId && out.views.some((p) => p.id === defaultId)) {
+    // Which view opens first. Kept when it names none of these: a person's default can name a published
+    // view, which is not among their own. One that names nothing any more is passed over where it is read.
+    if (defaultId) {
       out.defaultViewId = defaultId;
     }
 
