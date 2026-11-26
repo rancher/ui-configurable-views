@@ -345,6 +345,26 @@ describe('views Liz proposed', () => {
     expect(removed).toStrictEqual(['liz-view-platform-change']);
   });
 
+  it('takes out a copy of her view published from the editor, which stood in for it, so everyone sees the change', async() => {
+    const org = {
+      views: [{
+        id: 'cm:liz-view-platform', name: 'Platform, edited', widgets: []
+      }, {
+        id: 'view-other', name: 'Other', widgets: []
+      }]
+    };
+    const home = configMap('templating-home', { home: { global: org } });
+    const { store, saved, removed } = draftStore([platform, change, home]);
+
+    await approveDraft(store, 'draft:liz-view-platform-change');
+
+    const stored = store.getters['management/byId']('configmap', 'default/templating-home') as FakeConfigMap;
+
+    expect(saved.map((cm) => [cm.metadata.name, cm.data.view])).toStrictEqual([['liz-view-platform', change.data.view]]);
+    expect(JSON.parse(stored.data.home).global.views.map((v: { id: string }) => v.id)).toStrictEqual(['view-other']);
+    expect(removed).toStrictEqual(['liz-view-platform-change']);
+  });
+
   it('refuses a proposal that is gone, and a change to a view that is gone, writing nothing', async() => {
     const gone = draftStore([]);
     const targetGone = draftStore([change]);

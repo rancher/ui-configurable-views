@@ -264,8 +264,9 @@ export class DraftError extends Error {
 
 /**
  * Publish what Liz proposed. A new view: its ConfigMap becomes a published view, as one written by Liz
- * before drafts. A change: the view it replaces takes the draft's, and the draft goes. Resolves to the
- * id of the published view, to open it.
+ * before drafts. A change: the view it replaces takes the draft's, and the draft goes - for everyone, so
+ * a copy of her view published from the editor, which stands in for her ConfigMap under its id, goes too.
+ * Resolves to the id of the published view, to open it.
  */
 export async function approveDraft(store: VuexStore, id: string): Promise<string> {
   const name = id.slice(DRAFT_VIEW_PREFIX.length);
@@ -289,9 +290,20 @@ export async function approveDraft(store: VuexStore, id: string): Promise<string
 
     copy.data = { ...(copy.data || {}), view: draft.data?.view || '' };
     await copy.save();
+
+    // Her ConfigMap shows again where a copy of it published from the editor stood in for it
+    const page = (target.data?.page || PAGE_HOME) as PageKey;
+    const standIn = `${ GENERATED_VIEW_PREFIX }${ replaces }`;
+    const org = appliedViewScopes(store.getters, page).global;
+
+    if (org?.views.some((p) => p.id === standIn)) {
+      const left: PageViews = { ...JSON.parse(JSON.stringify(org)), views: org.views.filter((p) => p.id !== standIn) };
+
+      await saveView(store, 'global', left.views.length ? left : null, page);
+    }
     await draft.remove();
 
-    return `${ GENERATED_VIEW_PREFIX }${ replaces }`;
+    return standIn;
   }
 
   const copy: ConfigMapModel = await store.dispatch('management/clone', { resource: draft });
