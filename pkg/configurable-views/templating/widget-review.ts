@@ -1,5 +1,6 @@
-// What an admin should know about an other widget - code by Liz or an admin - before approving it: which of Rancher's
-// components it draws with, and where it built something by hand or reached outside what it is given.
+// What an admin should know about an other widget - code by Liz or an admin - before approving it:
+// which of Rancher's components it draws with, and where it built something by hand or reached outside
+// what it is given.
 //
 // A reading aid, not a gate - the approval is. Pure: reads the source as text.
 

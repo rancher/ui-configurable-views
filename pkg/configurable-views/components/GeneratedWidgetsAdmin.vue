@@ -16,8 +16,9 @@ import { useConfirm } from '../composables/useConfirm';
 import { useWidgetHashes } from '../composables/useWidgetHashes';
 
 // The other widgets - added as code, by Liz or by an admin - and the gate in front of them: an admin
-// reads each one's code and approves it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
-// is what was read - a change sends it back here. Revoking stops it everywhere at once.
+// reads each one's code and approves it. Approving records the hash of the code as it was read, so a
+// widget runs only as long as its code is what was read - a change sends it back here. Revoking stops it
+// everywhere at once.
 //
 // Only for those who can approve (see canApproveWidgets): anyone else would be shown buttons that fail.
 
@@ -30,18 +31,22 @@ const canApprove = computed(() => canApproveWidgets(store.getters));
 
 // The widgets, and the approvals as they are now: Settings opens without the widgets otherwise (the
 // switch above it is a preference), and the shell read the approvals only when Rancher opened.
-const refresh = () => Promise.all([fetchTemplatingConfigMaps(store), fetchWidgetApprovals(store)]);
-
-onMounted(refresh);
+onMounted(() => Promise.all([fetchTemplatingConfigMaps(store), fetchWidgetApprovals(store)]));
 
 const widgets = computed(() => generatedWidgets(store.getters));
 
 // When each one last changed, read again whenever one of them does - by name, see fetchWidgetChanges.
-// Only for those who see the list.
+// Only for those who see the list. A read overtaken by a newer one lands nothing.
 const changed = ref<Record<string, string>>({});
+let reading = 0;
 
 watch(() => (canApprove.value ? widgets.value.map((w) => `${ w.name }@${ w.version }`).join(',') : ''), async(versions) => {
-  changed.value = versions ? await fetchWidgetChanges(store, widgets.value.map((w) => w.name)) : {};
+  const mine = ++reading;
+  const read = versions ? await fetchWidgetChanges(store, widgets.value.map((w) => w.name)) : {};
+
+  if (mine === reading) {
+    changed.value = read;
+  }
 }, { immediate: true });
 
 // What a reviewer should know before approving: the Rancher components each one draws with, and
@@ -98,8 +103,8 @@ async function run(name: string, action: () => Promise<void>, done: string): Pro
   busy.value = name;
 
   try {
+    // The store has the result: each action saves through the models it changes
     await action();
-    await refresh();
     shell.notification.send(NotificationLevel.Success, t('configurableViews.generatedAdmin.title'), done);
   } catch (e) {
     shell.notification.send(NotificationLevel.Error, t('configurableViews.generatedAdmin.failed'), (e as Error)?.message || String(e));

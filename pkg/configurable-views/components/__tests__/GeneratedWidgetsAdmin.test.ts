@@ -3,12 +3,17 @@ import GeneratedWidgetsAdmin from '@pkg/configurable-views/components/GeneratedW
 
 // What the page is answered with, set by each test.
 const mockState = {
-  canApprove: true,
-  confirm:    jest.fn(),
-  approve:    jest.fn(),
-  remove:     jest.fn(),
-  changes:    {} as Record<string, string>,
+  canApprove:  true,
+  confirm:     jest.fn(),
+  approve:     jest.fn(),
+  remove:      jest.fn(),
+  changes:     {} as Record<string, string>,
+  readChanges: jest.fn((..._args: unknown[]): Promise<Record<string, string>> => Promise.resolve(mockChanges())),
 };
+
+function mockChanges(): Record<string, string> {
+  return mockState.changes;
+}
 
 // The stored widgets and approvals, as Vue refs, so a change shows on the page as the store's would.
 jest.mock('@pkg/configurable-views/templating/template-engine', () => {
@@ -25,7 +30,7 @@ jest.mock('@pkg/configurable-views/templating/template-engine', () => {
     deleteGeneratedWidget:     (...args: unknown[]) => mockState.remove(...args),
     fetchTemplatingConfigMaps: () => Promise.resolve(),
     fetchWidgetApprovals:      () => Promise.resolve(),
-    fetchWidgetChanges:        () => Promise.resolve(mockState.changes),
+    fetchWidgetChanges:        (...args: unknown[]) => mockState.readChanges(...args),
   };
 });
 // A hash that says which code it is of
@@ -61,6 +66,17 @@ describe('the other widgets, on Settings', () => {
     mockState.confirm.mockReset().mockResolvedValue(true);
     mockState.approve.mockReset().mockResolvedValue(undefined);
     mockState.remove.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('reads when the widgets changed only for someone who sees them', async() => {
+    mockState.readChanges.mockClear();
+    mockState.canApprove = false;
+    await mountAdmin();
+    expect(mockState.readChanges).not.toHaveBeenCalled();
+
+    mockState.canApprove = true;
+    await mountAdmin();
+    expect(mockState.readChanges).toHaveBeenCalledWith(expect.anything(), ['liz-widget-a']);
   });
 
   it('is not shown to someone who cannot approve', async() => {

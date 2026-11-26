@@ -33,6 +33,8 @@ interface Section {
   key: string;
   label: string;
   set: PageViews;
+  /** The view your default names, by its id or your copy's: a default can name a published view */
+  yourDefault: string;
 }
 
 const store = useStore();
@@ -81,15 +83,18 @@ onMounted(async() => {
 function sectionsFor(page: PageKey): Section[] {
   const scopes = appliedViewScopes(store.getters, page);
   const out: Section[] = [];
+  // Your default, on your copy of the view it names when you have one, else on the published view itself
+  const named = scopes.user?.defaultViewId || '';
+  const yourDefault = scopes.user?.views.find((p) => p.id === named || (named && p.from === named))?.id || named;
 
   if (scopes.global?.views.length) {
     out.push({
-      key: 'global', label: t('configurableViews.savedViews.organization'), set: scopes.global
+      key: 'global', label: t('configurableViews.savedViews.organization'), set: scopes.global, yourDefault
     });
   }
   if (scopes.user?.views.length) {
     out.push({
-      key: 'user', label: t('configurableViews.savedViews.yours'), set: scopes.user
+      key: 'user', label: t('configurableViews.savedViews.yours'), set: scopes.user, yourDefault
     });
   }
 
@@ -284,9 +289,13 @@ async function saveYaml(): Promise<void> {
                 <span class="saved-views__tab-name">{{ view.name }}</span>
                 <span class="saved-views__tags">
                   <span
-                    v-if="sec.set.defaultViewId === view.id"
+                    v-if="sec.key === 'user' ? sec.yourDefault === view.id : sec.set.defaultViewId === view.id"
                     class="saved-views__kind"
                   >{{ t('configurableViews.savedViews.default') }}</span>
+                  <span
+                    v-if="sec.key === 'global' && sec.yourDefault === view.id"
+                    class="saved-views__kind"
+                  >{{ t('configurableViews.savedViews.yourDefault') }}</span>
                   <span
                     v-if="isStock(view)"
                     class="text-muted"

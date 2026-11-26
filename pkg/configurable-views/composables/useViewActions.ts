@@ -408,7 +408,10 @@ export function useViewActions(
     } : null;
   }
 
-  /** Take the published view: your copy shows it again, and follows it from now on. Same tab, same place. */
+  /**
+   * Take the published view: your copy shows it again, and follows it from now on. Same tab, same place.
+   * Your changes to the copy go at once and are offered back for a while, as a deleted view is.
+   */
   async function takePublishedView(id: string): Promise<void> {
     const found = outdated(id);
 
@@ -417,9 +420,28 @@ export function useViewActions(
     }
 
     const { draft, mine, source } = found;
+    const yours = clone(mine);
 
     draft.views.splice(draft.views.indexOf(mine), 1, copyOf(source, mine.id));
     await pageViews.persist(draft, activeViewId.value);
+
+    store.dispatch('growl/success', {
+      title:   t('configurableViews.outdated.taken'),
+      message: t('configurableViews.outdated.takenMessage', { name: yours.name }, true),
+      timeout: UNDO_TIMEOUT,
+      action:  {
+        label: t('configurableViews.bar.undo'),
+        run:   async() => {
+          const now = pageViews.userDraft();
+          const at = now.views.findIndex((p) => p.id === yours.id);
+
+          if (at >= 0) {
+            now.views.splice(at, 1, yours);
+            await pageViews.persist(now, activeViewId.value);
+          }
+        },
+      },
+    });
   }
 
   /** Keep your copy: it is yours, as it is, and publishing it is publishing your changes. */

@@ -99,12 +99,15 @@ export function decide(ours: AgentConfig, theirs: AgentConfig | null): 'create' 
   return stored === mine ? 'current' : 'newer';
 }
 
-/** The connection fields Liz's own agent has: none of them where it could not be read */
-export function connectionOf(core: Pick<AgentConfig, 'spec'> | null | undefined): Connection {
+/** The connection fields Liz's own agent has - a field it lacks is one ours do without - or null where it could not be read */
+export function connectionOf(core: Pick<AgentConfig, 'spec'> | null | undefined): Connection | null {
+  if (!core) {
+    return null;
+  }
   const out: Connection = {};
 
   CONNECTION_FIELDS.forEach((field) => {
-    if (core?.spec?.[field] !== undefined) {
+    if (core.spec?.[field] !== undefined) {
       out[field] = clone(core.spec[field]);
     }
   });
@@ -112,17 +115,34 @@ export function connectionOf(core: Pick<AgentConfig, 'spec'> | null | undefined)
   return out;
 }
 
-/** The fields of `connection` that a copy in Rancher has otherwise */
-export function connectionChanges(theirs: Pick<AgentConfig, 'spec'>, connection: Connection): Connection {
+/** The connection fields a copy in Rancher has otherwise; one to remove is there, undefined. None without a connection. */
+export function connectionChanges(theirs: Pick<AgentConfig, 'spec'>, connection: Connection | null): Connection {
   const out: Connection = {};
 
+  if (connection) {
+    CONNECTION_FIELDS.forEach((field) => {
+      if (JSON.stringify(theirs.spec?.[field]) !== JSON.stringify(connection[field])) {
+        out[field] = connection[field];
+      }
+    });
+  }
+
+  return out;
+}
+
+/** A spec with the connection fields set as given, and those given as undefined removed */
+function connected<T extends Record<string, unknown>>(spec: T, connection: Connection): T {
+  const out: Record<string, unknown> = { ...spec };
+
   (Object.keys(connection) as (keyof Connection)[]).forEach((field) => {
-    if (JSON.stringify(theirs.spec?.[field]) !== JSON.stringify(connection[field])) {
-      out[field] = connection[field];
+    if (connection[field] === undefined) {
+      delete out[field];
+    } else {
+      out[field] = clone(connection[field]);
     }
   });
 
-  return out;
+  return out as T;
 }
 
 const isNotFound = (e: unknown): boolean => {
@@ -158,10 +178,10 @@ async function findCore(store: VuexStore, force: boolean): Promise<AgentConfig |
   }
 }
 
-async function installOne(store: VuexStore, ours: AgentConfig, connection: Connection, force: boolean): Promise<AgentResult> {
+async function installOne(store: VuexStore, ours: AgentConfig, connection: Connection | null, force: boolean): Promise<AgentResult> {
   const { name, namespace } = ours.metadata;
   const base = { name, displayName: ours.spec.displayName };
-  const spec = { ...clone(ours.spec), ...clone(connection) };
+  const spec = connected(clone(ours.spec), connectionChanges(ours, connection));
   let theirs: AgentModel | null = null;
 
   // Read from the store's copy when it has one - installing an extension takes a reload, which empties it -
@@ -223,7 +243,7 @@ async function installOne(store: VuexStore, ours: AgentConfig, connection: Conne
       }
       const copy: AgentModel = await store.dispatch('management/clone', { resource: theirs });
 
-      copy.spec = { ...copy.spec, ...clone(changes) };
+      copy.spec = connected(copy.spec, changes);
       await copy.save();
 
       return {

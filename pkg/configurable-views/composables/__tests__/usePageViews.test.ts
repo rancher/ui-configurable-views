@@ -2,6 +2,7 @@ import type { VuexStore } from '@shell/types/store/vuex';
 import { reactive, ref } from 'vue';
 import { contentHash, copyOf, followPublished, usePageViews } from '@pkg/configurable-views/composables/usePageViews';
 import { useViewActions } from '@pkg/configurable-views/composables/useViewActions';
+import { useEditSession } from '@pkg/configurable-views/composables/useEditSession';
 import type { PageViews, View } from '@pkg/configurable-views/templating/types';
 
 // The page's URL, which a test can give a query, and where the query is replaced
@@ -190,10 +191,19 @@ describe('your copy of a published view', () => {
     const views = usePageViews({ page: 'home' }, store, (key: string) => key);
     const confirm = jest.fn().mockResolvedValue(false);
     const actions = useViewActions(views, { page: 'home', title: 'Home' }, store, ((key: string) => key) as never, confirm, ref(null), jest.fn());
+    const edit = useEditSession(views, {
+      page: 'home', title: 'Home', firstViewName: 'First'
+    }, store, ((key: string) => key) as never, confirm);
     const written = (): PageViews | undefined => (dispatch.mock.calls.filter(([action]) => action === 'prefs/set').pop()?.[1] as { value: { home?: PageViews } } | undefined)?.value.home;
+    // What publishing wrote for everyone: the organization's views in the page's config
+    const publishedNow = (): View[] => {
+      const made = dispatch.mock.calls.filter(([action]) => action === 'management/create').pop()?.[1] as { data: { home: string } } | undefined;
+
+      return made ? JSON.parse(made.data.home).global.views : [];
+    };
 
     return {
-      views, actions, confirm, written
+      views, actions, edit, confirm, written, publishedNow
     };
   }
 
@@ -280,6 +290,45 @@ describe('your copy of a published view', () => {
     const mine = written()?.views.find((v) => v.id === 'mine') as View;
 
     expect(mine.fromHash).toBe(contentHash(mine));
+  });
+
+  it('publishes the view without your record of what it showed, and remembers it on your copy while editing too', async() => {
+    const {
+      views, actions, edit, confirm, publishedNow
+    } = page(before, { views: [copyMadeOf(before, { name: 'My platform' })] });
+
+    views.setActiveView('mine');
+    edit.enterEdit();
+    confirm.mockResolvedValueOnce(true);
+    await actions.publishView('mine');
+
+    const working = views.working.value?.views.find((v) => v.id === 'mine') as View;
+
+    expect(publishedNow().map((v) => [v.id, v.name, 'fromHash' in v])).toStrictEqual([[PUBLISHED, 'My platform', false]]);
+    expect(working.fromHash).toBe(contentHash(working));
+  });
+
+  it('drops a copy left as it was when an edit is saved, and keeps the default on the published view', async() => {
+    const { views, edit, written } = page(before, { views: [copyMadeOf(before)], defaultViewId: 'mine' });
+
+    views.setActiveView('mine');
+    edit.enterEdit();
+    await edit.save();
+
+    expect(written()).toStrictEqual({ views: [], defaultViewId: PUBLISHED });
+  });
+
+  it('saves the changes to a copy as a view of your own, with no record of the published view', async() => {
+    const { views, edit, written } = page(before, { views: [copyMadeOf(before)] });
+
+    views.setActiveView('mine');
+    edit.enterEdit();
+    (views.workingView() as View).name = 'Changed';
+    await edit.saveAsNewView();
+
+    const added = written()?.views.find((v) => v.id !== 'mine') as View;
+
+    expect([added.from, added.fromHash]).toStrictEqual([undefined, undefined]);
   });
 
   it('keeps a copy you made your default as the default once its view is unpublished', () => {

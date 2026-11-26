@@ -3,8 +3,8 @@ import { widgetHash } from '../templating/widget-hash';
 import type { GeneratedWidget } from '../templating/template-engine';
 
 /**
- * The hash of each other widget (code, by Liz or an admin), by name - what an approval is compared with. Hashed again whenever
- * the widgets are read again; a hashing overtaken by a newer one never lands.
+ * The hash of each other widget (code, by Liz or an admin), by name - what an approval is compared with.
+ * Hashed again whenever the widgets are read again; a hashing overtaken by a newer one never lands.
  */
 export function useWidgetHashes(widgets: () => GeneratedWidget[]) {
   const hashes = ref<Record<string, string>>({});

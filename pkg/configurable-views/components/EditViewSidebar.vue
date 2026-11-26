@@ -176,9 +176,9 @@ const spacings = SPACING_PRESETS;
 const tileText = (entry: CatalogEntry) => `${ entryLabel(entry, t) } ${ entryDesc(entry, t) }`;
 const blocks = computed(() => searchCatalog(BUILDING_BLOCKS, search.value, tileText));
 const readyMade = computed(() => searchCatalog(READY_MADE, search.value, tileText));
-// The other widgets - added as code, by Liz or by an admin - that an admin approved - new kinds of widget, dropped like any other
-// Only those whose code is still the code approved: one changed since would only say, once added, that
-// it needs approving again
+// The other widgets, added as code by Liz or by an admin: new kinds of widget, dropped like any other.
+// Only those an admin approved, and whose code is still the code approved: one changed since would only
+// say, once added, that it needs approving again
 const lizWidgets = computed(() => generatedWidgets(store.getters));
 const lizHashes = useWidgetHashes(() => lizWidgets.value);
 const generated = computed(() => {

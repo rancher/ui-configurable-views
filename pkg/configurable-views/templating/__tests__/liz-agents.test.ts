@@ -238,7 +238,7 @@ describe('liz-agents', () => {
         authenticationType: 'RANCHER', caBundleRef: CA, systemPrompt: 'hers'
       }))).toStrictEqual({ authenticationType: 'RANCHER', caBundleRef: CA });
       expect(connectionOf(core({ authenticationType: 'RANCHER' }))).toStrictEqual({ authenticationType: 'RANCHER' });
-      expect(connectionOf(null)).toStrictEqual({});
+      expect(connectionOf(null)).toBeNull();
     });
 
     it('adds and replaces the agents with it', async() => {
@@ -277,6 +277,21 @@ describe('liz-agents', () => {
       expect(withoutCa.saved.map((a) => [a.metadata.name, a.spec.authenticationType, a.spec.caBundleRef])).toStrictEqual([['widget-builder', 'RANCHER', undefined]]);
       expect((await installLizAgents(unreadable.store)).results.map((r) => r.state)).toStrictEqual(['current', 'current']);
       expect(unreadable.saved).toHaveLength(0);
+    });
+
+    it("takes off a CA bundle Liz's own agent no longer has", async() => {
+      const { store, saved } = storeWith({
+        rancher:         core({ authenticationType: 'RANCHER' }),
+        'views-builder': agent('views-builder', 2, {
+          authenticationType: 'RANCHER', caBundleRef: CA, systemPrompt: 'as it is'
+        }),
+        'widget-builder': agent('widget-builder', 1, { authenticationType: 'RANCHER' }),
+      });
+
+      expect((await installLizAgents(store)).results.map((r) => r.state)).toStrictEqual(['connected', 'current']);
+      expect(saved[0].spec).toStrictEqual({
+        displayName: 'views-builder', enabled: true, authenticationType: 'RANCHER', systemPrompt: 'as it is'
+      });
     });
 
     it('does not change the connection of a copy it may not change', async() => {

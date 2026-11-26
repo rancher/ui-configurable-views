@@ -34,8 +34,8 @@ import type { CompiledWidget } from '../../templating/widget-compiler';
 import type { GeneratedComponentName } from '../../templating/widget-review';
 import type { WidgetSpec } from '../../templating/types';
 
-// AN OTHER WIDGET, added as code by Liz or by an admin — a Vue component from a ConfigMap of its own (see generatedWidgets), compiled in
-// the page and drawn like any other widget.
+// AN OTHER WIDGET, added as code by Liz or by an admin — a Vue component from a ConfigMap of its own
+// (see generatedWidgets), compiled in the page and drawn like any other widget.
 //
 // Only once an admin approved it, and only the exact code approved: the source's hash must match the
 // approval, so a widget changed since - by Liz or by hand - shows that it needs approving again
@@ -52,7 +52,7 @@ const { cluster } = useWidgetCluster(() => props.widget);
 
 /**
  * The components a generated widget can draw with, by the names it uses in its template - Rancher's
- * own, so what Liz writes looks and behaves like the rest of the dashboard. Keyed by the review's list
+ * own, so the widget looks and behaves like the rest of the dashboard. Keyed by the review's list
  * (see widget-review), so the two cannot drift apart. The Widget Builder agent is told to use these
  * for anything they cover, and the approval page says when a widget built something by hand instead.
  */

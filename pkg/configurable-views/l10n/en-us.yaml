@@ -174,6 +174,8 @@ configurableViews:
     differs: "Your copy of “{name}” is not what is published for everyone, which may have changed since you made it."
     take: Use the Published View
     keep: Keep My Copy
+    taken: Published view in use
+    takenMessage: "Your changes to “{name}” were replaced by the published view."
   drafts:
     label: Proposed by Liz
     pill: Proposed
@@ -412,6 +414,7 @@ configurableViews:
     yours: Yours
     count: "{count, plural, =1 {1 view} other {# views}}"
     default: default
+    yourDefault: your default
     stock: stock
     stockHint: "Rancher’s own {page}, shown as a tab. Nothing to configure."
     noWidgets: No widgets yet.
