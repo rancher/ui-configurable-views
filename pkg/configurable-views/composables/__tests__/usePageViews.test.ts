@@ -3,7 +3,8 @@ import { reactive, ref } from 'vue';
 import { contentHash, copyOf, followPublished, usePageViews } from '@pkg/configurable-views/composables/usePageViews';
 import { useViewActions } from '@pkg/configurable-views/composables/useViewActions';
 import { useEditSession } from '@pkg/configurable-views/composables/useEditSession';
-import type { PageViews, View } from '@pkg/configurable-views/templating/types';
+import { resizeWidget } from '@pkg/configurable-views/templating/grid-layout';
+import type { LayoutView, PageViews, View } from '@pkg/configurable-views/templating/types';
 
 // The page's URL, which a test can give a query, and where the query is replaced
 const mockRoute: { query: Record<string, string> } = { query: {} };
@@ -203,7 +204,7 @@ describe('your copy of a published view', () => {
     };
 
     return {
-      views, actions, edit, confirm, written, publishedNow
+      views, actions, edit, confirm, written, publishedNow, dispatch
     };
   }
 
@@ -269,6 +270,35 @@ describe('your copy of a published view', () => {
     const mine = written()?.views.find((v) => v.id === 'mine') as View & { widgets: unknown[] };
 
     expect([mine.name, mine.widgets.length, mine.from]).toStrictEqual(['Platform', 2, PUBLISHED]);
+  });
+
+  it('offers your copy back after taking the published view', async() => {
+    const { actions, written, dispatch } = page(after, { views: [copyMadeOf(before, { name: 'My platform' })] });
+
+    await actions.takePublishedView('mine');
+    const offered = dispatch.mock.calls.find(([action]) => action === 'growl/success')?.[1] as { title: string, action: { label: string, run: () => Promise<void> } };
+
+    expect([offered.title, offered.action.label]).toStrictEqual(['configurableViews.outdated.taken', 'configurableViews.bar.undo']);
+    await offered.action.run();
+
+    const mine = written()?.views.find((v) => v.id === 'mine') as View & { widgets: unknown[] };
+
+    expect([mine.name, mine.widgets.length]).toStrictEqual(['My platform', 1]);
+  });
+
+  it('makes the copy being edited your default, in the draft that Save writes too', async() => {
+    const {
+      views, actions, edit, written
+    } = page(before, { views: [copyMadeOf(before)] });
+
+    views.setActiveView('mine');
+    edit.enterEdit();
+    (views.workingView() as View).name = 'Changed';
+    await actions.setDefaultView('mine');
+
+    expect(views.defaultViewId.value).toBe('mine');
+    await edit.save();
+    expect(written()?.defaultViewId).toBe(PUBLISHED);
   });
 
   it('keeps your copy on request: it is then your changes to what is published now', async() => {
@@ -367,5 +397,98 @@ describe('your copy of a published view', () => {
     expect(views.defaultViewId.value).toBe('mine');
     views.setActiveView(PUBLISHED);
     expect(views.activeViewId.value).toBe('mine');
+  });
+});
+
+describe('publishing your copy from the editor', () => {
+  const MARKER = 'templates.rancher.io/ai-templating';
+  const PUBLISHED = 'cm:liz-view-platform';
+  const widget = (title: string) => ({
+    type: 'widget', colSpan: 12, widget: { kind: 'banner', title }
+  });
+  const before = { name: 'Platform', widgets: [widget('one'), widget('two')] };
+
+  type Stored = { metadata: { name: string, namespace: string, labels: Record<string, string> }, data: Record<string, string> };
+  const lizMap = (view: unknown): Stored => ({
+    metadata: {
+      name: 'liz-view-platform', namespace: 'default', labels: { [MARKER]: 'true', 'templates.rancher.io/type': 'view' }
+    },
+    data: { page: 'home', view: JSON.stringify(view) },
+  });
+  const homeMap = (global: unknown): Stored => ({
+    metadata: {
+      name: 'templating-home', namespace: 'default', labels: { [MARKER]: 'true', 'templates.rancher.io/type': 'config' }
+    },
+    data: { home: JSON.stringify({ global }) },
+  });
+
+  // The page over what is stored, kept as Rancher keeps it: what is created or saved is there to read back
+  function page(stored: Stored[], mine: PageViews | null) {
+    const maps = reactive(stored) as Stored[];
+    const prefs = reactive<Record<string, unknown>>({ 'configurable-views-saved': mine ? { home: JSON.parse(JSON.stringify(mine)) } : {} });
+    const dispatch = jest.fn((action: string, payload?: { key?: string, value?: unknown, metadata?: Stored['metadata'], data?: Stored['data'] }) => {
+      if (action === 'management/create') {
+        const made = { metadata: payload?.metadata, data: payload?.data } as Stored;
+
+        return Promise.resolve({ ...made, save: () => Promise.resolve(maps.push(made)) });
+      }
+      if (action === 'prefs/set' && payload?.key) {
+        prefs[payload.key] = JSON.parse(JSON.stringify(payload.value));
+      }
+
+      return Promise.resolve(undefined);
+    });
+    const store = {
+      dispatch,
+      commit:  jest.fn(),
+      getters: {
+        'management/schemaFor': () => ({}),
+        'management/byId':      (_type: string, id: string) => maps.find((m) => `default/${ m.metadata.name }` === id),
+        'management/all':       () => maps,
+        'prefs/get':            (key: string) => prefs[key] ?? {},
+      },
+    } as unknown as VuexStore;
+    const views = usePageViews({ page: 'home' }, store, (key: string) => key);
+    const confirm = jest.fn().mockResolvedValue(true);
+    const actions = useViewActions(views, { page: 'home', title: 'Home' }, store, ((key: string) => key) as never, confirm, ref(null), jest.fn());
+    const edit = useEditSession(views, {
+      page: 'home', title: 'Home', firstViewName: 'First'
+    }, store, ((key: string) => key) as never, confirm);
+    const saved = (): PageViews => (prefs['configurable-views-saved'] as { home: PageViews }).home;
+
+    return {
+      views, actions, edit, saved, maps
+    };
+  }
+
+  it('leaves the copy following what was published, after a change to the layout', async() => {
+    const source = page([lizMap(before)], null).views.orgViews.value[0];
+    const editor = page([lizMap(before)], {
+      views: [{
+        ...copyOf(source), id: 'mine', name: 'My platform'
+      } as View]
+    });
+
+    editor.views.setActiveView('mine');
+    editor.edit.enterEdit();
+    const working = editor.views.workingView() as LayoutView;
+
+    // The first banner made half as wide: the editor rebuilds the widgets, keys in an order of its own
+    working.widgets = resizeWidget(working.widgets, working.widgets[0].id, 6, 'wrap');
+    await editor.actions.publishView('mine');
+    await editor.edit.save();
+
+    // Read back, then someone else adds a widget to the published view
+    const global = JSON.parse((editor.maps.find((m) => m.metadata.name === 'templating-home') as Stored).data.home).global as PageViews;
+    const readBack = page([lizMap(before), homeMap(global)], editor.saved());
+
+    expect(readBack.views.changedIds.value).toStrictEqual([]);
+
+    const later = { ...global, views: global.views.map((v) => (v.id === PUBLISHED ? { ...v, widgets: [...(v as LayoutView).widgets, widget('three')] } : v)) };
+    const after = page([lizMap(before), homeMap(later)], editor.saved());
+    // Your copy, or the published view itself when Save dropped a copy that matched it
+    const shown = after.views.views.value.find((v) => v.id === 'mine' || v.id === PUBLISHED) as LayoutView;
+
+    expect([after.views.outdatedIds.value, shown.widgets.length]).toStrictEqual([[], 3]);
   });
 });

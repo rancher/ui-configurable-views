@@ -389,16 +389,14 @@ describe('other widgets, added as code', () => {
   });
 
   it('reads when each last changed on its own, as the store leaves those records out, and skips one it cannot read', async() => {
-    const dispatch = jest.fn((_: string, { id }: { id: string }) => (id.endsWith('/liz-widget-gone') ? Promise.reject(new Error('404')) : Promise.resolve({ metadata: { managedFields: [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }] } })));
+    const dispatch = jest.fn((_: string, { url }: { url: string }) => (url.endsWith('/liz-widget-gone') ? Promise.reject(new Error('404')) : Promise.resolve({ metadata: { managedFields: [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }] } })));
 
     expect(await fetchWidgetChanges({ dispatch } as unknown as VuexStore, ['liz-widget-a', 'liz-widget-gone'])).toStrictEqual({ 'liz-widget-a': '2026-11-20T08:30:00Z' });
-    expect(dispatch).toHaveBeenCalledWith('management/find', {
-      type: 'configmap',
-      id:   'default/liz-widget-a',
-      opt:  {
-        force: true, watch: false, excludeFields: []
-      }
-    });
+    // A plain request, which leaves the store's ConfigMaps as they are
+    expect(dispatch.mock.calls).toStrictEqual([
+      ['management/request', { url: '/v1/configmaps/default/liz-widget-a' }],
+      ['management/request', { url: '/v1/configmaps/default/liz-widget-gone' }],
+    ]);
   });
 
   describe('approvals', () => {

@@ -36,7 +36,7 @@ export function useViewActions(
   leaveEdit: () => Promise<void>,
 ) {
   const {
-    editing, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
+    editing, working, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
   } = pageViews;
 
   /** Renamed in place on its tab. */
@@ -98,15 +98,19 @@ export function useViewActions(
     }
 
     const draft = pageViews.userDraft();
+    const named = view.id === BUILT_IN_STOCK_ID ? undefined : (view.from && orgIds.value.has(view.from) ? view.from : view.id);
 
-    if (view.id === BUILT_IN_STOCK_ID) {
-      delete draft.defaultViewId;
-      await pageViews.persist(draft, activeViewId.value);
-
-      return;
-    }
-
-    draft.defaultViewId = view.from && orgIds.value.has(view.from) ? view.from : view.id;
+    // While editing, the draft being edited is what Save writes: it takes the default too
+    [draft, editing.value ? working.value : null].forEach((set) => {
+      if (!set) {
+        return;
+      }
+      if (named) {
+        set.defaultViewId = named;
+      } else {
+        delete set.defaultViewId;
+      }
+    });
     await pageViews.persist(draft, activeViewId.value);
   }
 

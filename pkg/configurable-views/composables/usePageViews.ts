@@ -15,9 +15,15 @@ import type { LayoutView, View, PageViews } from '../templating/types';
 
 export const clone = <T, >(value: T): T => JSON.parse(JSON.stringify(value));
 
+/** JSON with every object's keys in order: the same content reads the same however it was put together. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+}
+
 /**
  * What a view shows, without what only says WHICH view it is (its id, the published view it was copied
  * from, whether it is the organization's) - so a copy and its source compare equal until one changes.
+ * Key order does not count: the editor builds widgets with their keys in another order than storage does.
  */
 export function viewContent(view: View): string {
   const copy: Partial<View> = { ...view };
@@ -27,7 +33,7 @@ export function viewContent(view: View): string {
   delete copy.fromHash;
   delete copy.org;
 
-  return JSON.stringify(copy);
+  return canonical(copy);
 }
 
 /** A short fingerprint of what a view shows (FNV-1a over viewContent): what a copy keeps of its source. */

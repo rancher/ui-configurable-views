@@ -395,21 +395,17 @@ function lastWrite(metadata: { managedFields?: { time?: string }[] } | undefined
 
 /**
  * When each widget last changed, by Liz or by hand: the latest write Kubernetes recorded for its ConfigMap,
- * by name. Read again, one widget at a time, asking for those records: the shell leaves them out of a read
- * unless asked. A widget that could not be read is not in it. Never rejects.
+ * by name. Read one widget at a time with the records, which the shell's reads leave out. A plain request,
+ * not a store action: a forced find of one ConfigMap makes the store drop the page of ConfigMaps it keeps
+ * up to date, so nothing more of them arrived while Settings was open. A widget that could not be read is
+ * not in it. Never rejects.
  */
 export async function fetchWidgetChanges(store: VuexStore, names: string[]): Promise<Record<string, string>> {
   const changed: Record<string, string> = {};
 
   await Promise.all(names.map(async(name) => {
     try {
-      const cm = await store.dispatch('management/find', {
-        type: CONFIG_MAP,
-        id:   `${ NAMESPACE }/${ name }`,
-        opt:  {
-          force: true, watch: false, excludeFields: []
-        }
-      });
+      const cm = await store.dispatch('management/request', { url: `/v1/${ CONFIG_MAP }s/${ NAMESPACE }/${ name }` });
       const at = lastWrite(cm?.metadata);
 
       if (at) {
