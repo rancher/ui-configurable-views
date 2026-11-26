@@ -256,15 +256,19 @@ describe('liz-agents', () => {
       const { store, saved } = storeWith({
         rancher:          core({ authenticationType: 'RANCHER', caBundleRef: CA }),
         'views-builder':  agent('views-builder', 2, { authenticationType: 'RANCHER', systemPrompt: 'as it is' }),
-        'widget-builder': agent('widget-builder', 9, { authenticationType: 'RANCHER', caBundleRef: CA }),
+        'widget-builder': agent('widget-builder', 9, { authenticationType: 'RANCHER', systemPrompt: 'newer' }),
       });
       const status = await installLizAgents(store);
 
-      expect(status.results.map((r) => r.state)).toStrictEqual(['connected', 'newer']);
-      expect(saved).toHaveLength(1);
-      expect(saved[0].spec).toStrictEqual({
-        displayName: 'views-builder', enabled: true, authenticationType: 'RANCHER', systemPrompt: 'as it is', caBundleRef: CA
-      });
+      expect(status.results.map((r) => r.state)).toStrictEqual(['connected', 'connected']);
+      expect(saved.map((a) => a.spec)).toStrictEqual([
+        {
+          displayName: 'views-builder', enabled: true, authenticationType: 'RANCHER', systemPrompt: 'as it is', caBundleRef: CA
+        },
+        {
+          displayName: 'widget-builder', enabled: true, authenticationType: 'RANCHER', systemPrompt: 'newer', caBundleRef: CA
+        },
+      ]);
     });
 
     it("changes nothing where Liz's own agent has no CA bundle, or cannot be read", async() => {
