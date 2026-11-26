@@ -7,7 +7,7 @@ import {
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
 import {
-  DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews
+  DEFAULT_GAP, newId, isStockView, builtInStockView, orderKeyOf, orderViews, storedForm
 } from '../templating/view-model';
 import type { SettingsAnchor } from './viewEditor';
 import type { LayoutView, View, PageViews } from '../templating/types';
@@ -23,10 +23,11 @@ function canonical(value: unknown): string {
 /**
  * What a view shows, without what only says WHICH view it is (its id, the published view it was copied
  * from, whether it is the organization's) - so a copy and its source compare equal until one changes.
- * Key order does not count: the editor builds widgets with their keys in another order than storage does.
+ * Read as storage reads it back, keys in order: the editor's own version of a view holds the same
+ * content in another order, and with values storage rewrites.
  */
 export function viewContent(view: View): string {
-  const copy: Partial<View> = { ...view };
+  const copy: Partial<View> = { ...storedForm(view) };
 
   delete copy.id;
   delete copy.from;

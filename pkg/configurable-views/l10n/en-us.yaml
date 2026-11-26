@@ -415,6 +415,7 @@ configurableViews:
     count: "{count, plural, =1 {1 view} other {# views}}"
     default: default
     yourDefault: your default
+    lizDefault: "Your default is “{name}”, a view Liz built."
     stock: stock
     stockHint: "Rancher’s own {page}, shown as a tab. Nothing to configure."
     noWidgets: No widgets yet.

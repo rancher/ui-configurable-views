@@ -272,18 +272,14 @@ describe('your copy of a published view', () => {
     expect([mine.name, mine.widgets.length, mine.from]).toStrictEqual(['Platform', 2, PUBLISHED]);
   });
 
-  it('offers your copy back after taking the published view', async() => {
-    const { actions, written, dispatch } = page(after, { views: [copyMadeOf(before, { name: 'My platform' })] });
+  it('does not count a default set while editing as a change for Cancel to discard: it is saved already', async() => {
+    const { views, actions, edit } = page(before, { views: [copyMadeOf(before)] });
 
-    await actions.takePublishedView('mine');
-    const offered = dispatch.mock.calls.find(([action]) => action === 'growl/success')?.[1] as { title: string, action: { label: string, run: () => Promise<void> } };
+    views.setActiveView('mine');
+    edit.enterEdit();
+    await actions.setDefaultView('mine');
 
-    expect([offered.title, offered.action.label]).toStrictEqual(['configurableViews.outdated.taken', 'configurableViews.bar.undo']);
-    await offered.action.run();
-
-    const mine = written()?.views.find((v) => v.id === 'mine') as View & { widgets: unknown[] };
-
-    expect([mine.name, mine.widgets.length]).toStrictEqual(['My platform', 1]);
+    expect([views.defaultViewId.value, views.dirty.value]).toStrictEqual(['mine', false]);
   });
 
   it('makes the copy being edited your default, in the draft that Save writes too', async() => {
@@ -457,9 +453,30 @@ describe('publishing your copy from the editor', () => {
     const saved = (): PageViews => (prefs['configurable-views-saved'] as { home: PageViews }).home;
 
     return {
-      views, actions, edit, saved, maps
+      views, actions, edit, saved, maps, dispatch
     };
   }
+
+  it('offers your copy back after taking the published view, and Undo brings it back', async() => {
+    const source = page([lizMap(before)], null).views.orgViews.value[0];
+    const later = { name: 'Platform', widgets: [widget('one'), widget('two'), widget('three')] };
+    const p = page([lizMap(later)], {
+      views: [{
+        ...copyOf(source), id: 'mine', name: 'My platform'
+      } as View]
+    });
+    const mine = () => p.saved().views.find((v) => v.id === 'mine') as LayoutView;
+
+    expect(p.views.outdatedIds.value).toStrictEqual(['mine']);
+    await p.actions.takePublishedView('mine');
+    expect([mine().name, mine().widgets.length]).toStrictEqual(['Platform', 3]);
+
+    const offered = p.dispatch.mock.calls.find(([action]) => action === 'growl/success')?.[1] as unknown as { title: string, action: { label: string, run: () => Promise<void> } };
+
+    expect([offered.title, offered.action.label]).toStrictEqual(['configurableViews.outdated.taken', 'configurableViews.bar.undo']);
+    await offered.action.run();
+    expect([mine().name, mine().widgets.length]).toStrictEqual(['My platform', 2]);
+  });
 
   it('leaves the copy following what was published, after a change to the layout', async() => {
     const source = page([lizMap(before)], null).views.orgViews.value[0];
@@ -487,6 +504,29 @@ describe('publishing your copy from the editor', () => {
     const later = { ...global, views: global.views.map((v) => (v.id === PUBLISHED ? { ...v, widgets: [...(v as LayoutView).widgets, widget('three')] } : v)) };
     const after = page([lizMap(before), homeMap(later)], editor.saved());
     // Your copy, or the published view itself when Save dropped a copy that matched it
+    const shown = after.views.views.value.find((v) => v.id === 'mine' || v.id === PUBLISHED) as LayoutView;
+
+    expect([after.views.outdatedIds.value, shown.widgets.length]).toStrictEqual([[], 3]);
+  });
+
+  it('leaves the copy following what was published, after an edit storage reads back otherwise', async() => {
+    const source = page([lizMap(before)], null).views.orgViews.value[0];
+    const editor = page([lizMap(before)], {
+      views: [{
+        ...copyOf(source), id: 'mine', name: 'My platform'
+      } as View]
+    });
+
+    editor.views.setActiveView('mine');
+    editor.edit.enterEdit();
+    // A value the editor keeps that storage does not: a subtitle typed, then cleared
+    (editor.views.workingView() as LayoutView).widgets[0].widget.subtitle = '';
+    await editor.actions.publishView('mine');
+    await editor.edit.save();
+
+    const global = JSON.parse((editor.maps.find((m) => m.metadata.name === 'templating-home') as Stored).data.home).global as PageViews;
+    const later = { ...global, views: global.views.map((v) => (v.id === PUBLISHED ? { ...v, widgets: [...(v as LayoutView).widgets, widget('three')] } : v)) };
+    const after = page([lizMap(before), homeMap(later)], editor.saved());
     const shown = after.views.views.value.find((v) => v.id === 'mine' || v.id === PUBLISHED) as LayoutView;
 
     expect([after.views.outdatedIds.value, shown.widgets.length]).toStrictEqual([[], 3]);

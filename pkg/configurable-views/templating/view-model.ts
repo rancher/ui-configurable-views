@@ -523,6 +523,11 @@ export function orderViews<T extends View>(views: T[], order: string[] | undefin
   return placed;
 }
 
+/** A view as storage reads it back: what is stored of it, and nothing else. */
+export function storedForm(view: View): View {
+  return normalizeView(JSON.parse(JSON.stringify(view)) as Loose);
+}
+
 function normalizeView(view: Loose): View {
   // A stock view carries no widgets — there is nothing to lay out.
   const out: View = isStockView(view) ? {

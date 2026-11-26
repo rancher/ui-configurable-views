@@ -9,7 +9,8 @@ import Tab from '@shell/components/Tabbed/Tab.vue';
 import { RcButton } from '@components/RcButton';
 import { BLANK_CLUSTER } from '@shell/store/store-types.js';
 import {
-  appliedViewScopes, fetchTemplatingConfigMaps, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig, type PageKey
+  appliedViewScopes, fetchTemplatingConfigMaps, generatedViews, getPageConfig, savePageConfig, PAGE_CLUSTER_DASHBOARD, PAGE_HOME, type PageConfig,
+  type PageKey
 } from '../templating/template-engine';
 import { definePrefs } from '../templating/user-prefs';
 import { cssSize, isStockView, normalizeSides } from '../templating/view-model';
@@ -78,6 +79,22 @@ onMounted(async() => {
   await fetchTemplatingConfigMaps(store);
   loaded.value = true;
 });
+
+/**
+ * The name of your default when it is a view Liz built that you have no copy of: those are not listed
+ * here, so the page says it in words.
+ */
+function lizDefault(page: PageKey): string {
+  const scopes = appliedViewScopes(store.getters, page);
+  const named = scopes.user?.defaultViewId || '';
+  const listed = [...(scopes.global?.views || []), ...(scopes.user?.views || [])];
+
+  if (!named || listed.some((p) => p.id === named || p.from === named)) {
+    return '';
+  }
+
+  return generatedViews(store.getters, page).find((p) => p.id === named)?.name || '';
+}
 
 /** The scopes that have views for a page: the organization's, then yours. */
 function sectionsFor(page: PageKey): Section[] {
@@ -268,6 +285,14 @@ async function saveYaml(): Promise<void> {
           v-clean-html="t('configurableViews.savedViews.none', { page: page.label }, true)"
           class="text-muted"
         />
+
+        <p
+          v-if="loaded && lizDefault(page.key) && yamlPage !== page.key"
+          class="text-muted"
+          data-testid="saved-views-liz-default"
+        >
+          {{ t('configurableViews.savedViews.lizDefault', { name: lizDefault(page.key) }) }}
+        </p>
 
         <div
           v-for="sec in sectionsFor(page.key)"

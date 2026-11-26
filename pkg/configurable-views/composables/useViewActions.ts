@@ -36,7 +36,7 @@ export function useViewActions(
   leaveEdit: () => Promise<void>,
 ) {
   const {
-    editing, working, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
+    editing, working, savedBaseline, activeViewId, pinnedView, saving, error, scopes, orgIds, orgViews, outdatedIds, views,
   } = pageViews;
 
   /** Renamed in place on its tab. */
@@ -99,9 +99,7 @@ export function useViewActions(
 
     const draft = pageViews.userDraft();
     const named = view.id === BUILT_IN_STOCK_ID ? undefined : (view.from && orgIds.value.has(view.from) ? view.from : view.id);
-
-    // While editing, the draft being edited is what Save writes: it takes the default too
-    [draft, editing.value ? working.value : null].forEach((set) => {
+    const setDefault = (set: PageViews | null): void => {
       if (!set) {
         return;
       }
@@ -110,7 +108,20 @@ export function useViewActions(
       } else {
         delete set.defaultViewId;
       }
-    });
+    };
+
+    // While editing, the draft being edited is what Save writes: it takes the default too. So does what
+    // the editor counts as saved, as the default is saved now - it is not a change for Cancel to discard.
+    setDefault(draft);
+    if (editing.value) {
+      setDefault(working.value);
+      if (savedBaseline.value !== null) {
+        const baseline = JSON.parse(savedBaseline.value) as PageViews;
+
+        setDefault(baseline);
+        savedBaseline.value = JSON.stringify(baseline);
+      }
+    }
     await pageViews.persist(draft, activeViewId.value);
   }
 
