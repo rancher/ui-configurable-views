@@ -1,7 +1,7 @@
 import { computed } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
-import { saveView, fetchTemplatingConfigMaps, type PageKey } from '../templating/template-engine';
+import { saveView, type PageKey } from '../templating/template-engine';
 import { DEFAULT_GAP, newId, newLayoutView, isStockView } from '../templating/view-model';
 import { stockWidgets, stockView } from '../templating/stock-layouts';
 import { clone, viewContent, type PageViewsState } from './usePageViews';
@@ -72,7 +72,6 @@ export function useEditSession(
     startedFrom.value = '';
     selectedNodeId.value = null;
     settingsNodeId.value = null;
-    await fetchTemplatingConfigMaps(store);
     pageViews.syncActiveView();
   }
 

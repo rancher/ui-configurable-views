@@ -2,7 +2,7 @@ import type { Ref } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import type { I18n } from '@shell/composables/useI18n';
 import {
-  saveView, fetchTemplatingConfigMaps, deleteGeneratedView, isGeneratedView, approveDraft, discardDraft, DraftError, type PageKey
+  saveView, deleteGeneratedView, isGeneratedView, approveDraft, discardDraft, DraftError, type PageKey
 } from '../templating/template-engine';
 import {
   newId, newLayoutView, isStockView, BUILT_IN_STOCK_ID, orderKeyOf
@@ -180,7 +180,6 @@ export function useViewActions(
     try {
       await saveView(store, 'global', org, props.page);
       await linkToPublished(source, published.id);
-      await fetchTemplatingConfigMaps(store);
     } catch (e) {
       error.value = (e as Error)?.message || String(e);
     } finally {
@@ -227,7 +226,6 @@ export function useViewActions(
       if (isGeneratedView(orgId)) {
         await deleteGeneratedView(store, orgId);
       }
-      await fetchTemplatingConfigMaps(store);
 
       if (view.org) {
         activeViewId.value = null;
@@ -346,7 +344,6 @@ export function useViewActions(
     try {
       const published = await approveDraft(store, id);
 
-      await fetchTemplatingConfigMaps(store);
       pageViews.setActiveView(published);
     } catch (e) {
       error.value = e instanceof DraftError ? t(`configurableViews.drafts.error.${ e.reason }`) : (e as Error)?.message || String(e);
@@ -373,7 +370,6 @@ export function useViewActions(
 
     try {
       await discardDraft(store, id);
-      await fetchTemplatingConfigMaps(store);
       activeViewId.value = null;
       pinnedView.value = false;
       pageViews.syncActiveView();

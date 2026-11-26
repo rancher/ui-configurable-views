@@ -198,6 +198,7 @@ configurableViews:
     state:
       installed: Added
       updated: Updated
+      connected: Connection updated from Liz’s own agent
       current: Up to date
       newer: A newer copy is kept
       builtIn: Built into Liz

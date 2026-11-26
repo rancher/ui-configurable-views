@@ -173,7 +173,6 @@ async function saveYaml(): Promise<void> {
 
   try {
     await savePageConfig(store, parsed, page);
-    await fetchTemplatingConfigMaps(store);
     yamlStatus.value = t('configurableViews.savedViews.saved');
     yamlPage.value = null;
   } catch (e) {

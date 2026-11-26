@@ -10,6 +10,12 @@
 //   the same revision, or a higher one      -> left as it is
 //   one built into Liz                      -> left as it is (Liz ships it)
 //
+// How they reach Rancher's MCP server is Liz's own agent's (`rancher`, built into her): its
+// authenticationType, and its caBundleRef where Rancher's certificate is one Liz must be told to trust.
+// Ours are created and replaced with them, and a copy that is otherwise current has just those two
+// updated when Liz's change. Without the CA bundle a Rancher with a self-signed certificate answers
+// every tool call with "certificate verify failed".
+//
 // Nothing happens where Liz is not installed (no AIAgentConfig type), nor for anyone who may not create
 // one. Uninstalling the package leaves the agents in place: the package is unloaded at every log out as
 // well, when nothing may be removed. They carry the managed-by label, for an admin who removes them.
@@ -17,6 +23,7 @@
 import { ref } from 'vue';
 import type { VuexStore } from '@shell/types/store/vuex';
 import { clone } from '@shell/utils/object';
+import type { KubeMetadata } from '@shell/types/kube/kube-api';
 import viewsBuilder from '../agents/views-builder.aiagentconfig.yaml';
 import widgetBuilder from '../agents/widget-builder.aiagentconfig.yaml';
 
@@ -28,13 +35,16 @@ export const MANAGED_BY_LABEL = 'app.kubernetes.io/managed-by';
 export const MANAGED_BY = 'configurable-views';
 export const REVISION_ANNOTATION = 'templates.rancher.io/agent-revision';
 
+/** Liz's own agent, built into her: where her agents' connection to the MCP server is set up */
+export const CORE_AGENT = { namespace: 'cattle-ai-agent-system', name: 'rancher' };
+
+/** How an agent reaches the MCP server, taken from Liz's own agent */
+export const CONNECTION_FIELDS = ['authenticationType', 'caBundleRef'] as const;
+
+export type Connection = Partial<Record<typeof CONNECTION_FIELDS[number], unknown>>;
+
 export interface AgentConfig {
-  metadata: {
-    name: string;
-    namespace: string;
-    labels?: Record<string, string>;
-    annotations?: Record<string, string>;
-  };
+  metadata: KubeMetadata & { namespace: string };
   spec: Record<string, unknown> & { displayName: string; enabled?: boolean; builtIn?: boolean };
   status?: { phase?: string };
 }
@@ -47,7 +57,7 @@ interface AgentModel extends AgentConfig {
 export const AGENTS: AgentConfig[] = [viewsBuilder as AgentConfig, widgetBuilder as AgentConfig];
 
 /** What happened to an agent: just created or replaced, already there, left alone, or not written */
-export type AgentState = 'installed' | 'updated' | 'current' | 'newer' | 'builtIn' | 'notAllowed' | 'failed';
+export type AgentState = 'installed' | 'updated' | 'connected' | 'current' | 'newer' | 'builtIn' | 'notAllowed' | 'failed';
 
 export interface AgentResult {
   name: string;
@@ -89,6 +99,32 @@ export function decide(ours: AgentConfig, theirs: AgentConfig | null): 'create' 
   return stored === mine ? 'current' : 'newer';
 }
 
+/** The connection fields Liz's own agent has: none of them where it could not be read */
+export function connectionOf(core: Pick<AgentConfig, 'spec'> | null | undefined): Connection {
+  const out: Connection = {};
+
+  CONNECTION_FIELDS.forEach((field) => {
+    if (core?.spec?.[field] !== undefined) {
+      out[field] = clone(core.spec[field]);
+    }
+  });
+
+  return out;
+}
+
+/** The fields of `connection` that a copy in Rancher has otherwise */
+export function connectionChanges(theirs: Pick<AgentConfig, 'spec'>, connection: Connection): Connection {
+  const out: Connection = {};
+
+  (Object.keys(connection) as (keyof Connection)[]).forEach((field) => {
+    if (JSON.stringify(theirs.spec?.[field]) !== JSON.stringify(connection[field])) {
+      out[field] = connection[field];
+    }
+  });
+
+  return out;
+}
+
 const isNotFound = (e: unknown): boolean => {
   const err = e as { _status?: number; status?: number; code?: string } | null;
 
@@ -111,14 +147,27 @@ export function lizAccess(getters: Getters): { liz: boolean; allowed: boolean } 
   };
 }
 
-async function installOne(store: VuexStore, ours: AgentConfig): Promise<AgentResult> {
+/** Liz's own agent, or null where it is not there or not readable */
+async function findCore(store: VuexStore): Promise<AgentConfig | null> {
+  try {
+    return await store.dispatch('management/find', {
+      type: AGENT_CONFIG, id: `${ CORE_AGENT.namespace }/${ CORE_AGENT.name }`, opt: { watch: false }
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+async function installOne(store: VuexStore, ours: AgentConfig, connection: Connection): Promise<AgentResult> {
   const { name, namespace } = ours.metadata;
   const base = { name, displayName: ours.spec.displayName };
+  const spec = { ...clone(ours.spec), ...clone(connection) };
   let theirs: AgentModel | null = null;
 
+  // Read from the store's copy when it has one: installing an extension takes a reload, which empties it
   try {
     theirs = await store.dispatch('management/find', {
-      type: AGENT_CONFIG, id: `${ namespace }/${ name }`, opt: { force: true, watch: false }
+      type: AGENT_CONFIG, id: `${ namespace }/${ name }`, opt: { watch: false }
     });
   } catch (e) {
     if (!isNotFound(e)) {
@@ -133,7 +182,7 @@ async function installOne(store: VuexStore, ours: AgentConfig): Promise<AgentRes
   try {
     if (action === 'create') {
       const created: AgentModel = await store.dispatch('management/create', {
-        type: AGENT_CONFIG, metadata: clone(ours.metadata), spec: clone(ours.spec)
+        type: AGENT_CONFIG, metadata: clone(ours.metadata), spec
       });
 
       await created.save();
@@ -152,13 +201,32 @@ async function installOne(store: VuexStore, ours: AgentConfig): Promise<AgentRes
       // Changed on a copy, so a write that fails leaves the store's copy as it was
       const copy: AgentModel = await store.dispatch('management/clone', { resource: theirs });
 
-      copy.spec = { ...clone(ours.spec), enabled: theirs.spec?.enabled ?? ours.spec.enabled };
+      copy.spec = { ...spec, enabled: theirs.spec?.enabled ?? ours.spec.enabled };
       copy.metadata.labels = { ...(theirs.metadata.labels || {}), ...(ours.metadata.labels || {}) };
       copy.metadata.annotations = { ...(theirs.metadata.annotations || {}), ...(ours.metadata.annotations || {}) };
       await copy.save();
 
       return {
         ...base, state: 'updated', phase: theirs.status?.phase
+      };
+    }
+
+    // Otherwise current, or newer: only how it connects follows Liz's own agent
+    const changes = theirs && (action === 'current' || action === 'newer') ? connectionChanges(theirs, connection) : {};
+
+    if (theirs && Object.keys(changes).length) {
+      if (!theirs.canUpdate) {
+        return {
+          ...base, state: 'notAllowed', phase: theirs.status?.phase
+        };
+      }
+      const copy: AgentModel = await store.dispatch('management/clone', { resource: theirs });
+
+      copy.spec = { ...copy.spec, ...clone(changes) };
+      await copy.save();
+
+      return {
+        ...base, state: 'connected', phase: theirs.status?.phase
       };
     }
   } catch (e) {
@@ -186,10 +254,11 @@ export async function installLizAgents(store: VuexStore, agents: AgentConfig[] =
   }
 
   const results: AgentResult[] = [];
+  const connection = connectionOf(await findCore(store));
 
   // One after the other: two agents, and an order that reads the same in Settings every time
   for (const agent of agents) {
-    results.push(await installOne(store, agent));
+    results.push(await installOne(store, agent, connection));
   }
 
   return {
@@ -215,12 +284,4 @@ export function ensureLizAgents(store: VuexStore, { again = false } = {}): Promi
   }
 
   return checking;
-}
-
-/** For the tests: forget the check */
-export function resetLizAgents(): void {
-  checking = null;
-  lizAgentStatus.value = {
-    liz: 'unknown', allowed: false, results: []
-  };
 }

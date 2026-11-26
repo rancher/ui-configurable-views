@@ -3,8 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import jsyaml from 'js-yaml';
 import {
-  AGENT_CONFIG, MANAGED_BY, MANAGED_BY_LABEL, REVISION_ANNOTATION, decide, ensureLizAgents, installLizAgents, lizAgentStatus,
-  resetLizAgents, revisionOf, type AgentConfig
+  AGENT_CONFIG, MANAGED_BY, MANAGED_BY_LABEL, REVISION_ANNOTATION, connectionOf, decide, installLizAgents, revisionOf, type AgentConfig
 } from '@pkg/configurable-views/templating/liz-agents';
 
 // Jest has no loader for the agent files, so the package's imports of them get these; the files
@@ -96,8 +95,6 @@ function storeWith(stored: Record<string, Partial<Stored>> = {}, {
 }
 
 describe('liz-agents', () => {
-  beforeEach(() => resetLizAgents());
-
   describe('decide', () => {
     it.each([
       ['none in Rancher', null, 'create'],
@@ -207,16 +204,81 @@ describe('liz-agents', () => {
 
   describe('ensureLizAgents', () => {
     it('checks once each time Rancher loads, and again when asked, keeping the result for Settings', async() => {
+      // The module as Rancher loads it: nothing checked yet
+      jest.resetModules();
+      const { ensureLizAgents, lizAgentStatus } = await import('@pkg/configurable-views/templating/liz-agents');
       const { store, dispatch } = storeWith();
+      const reads = () => dispatch.mock.calls.filter(([action, { id }]) => action === 'management/find' && id !== 'cattle-ai-agent-system/rancher').length;
+
+      expect(lizAgentStatus.value.liz).toBe('unknown');
 
       await Promise.all([ensureLizAgents(store), ensureLizAgents(store)]);
-      const reads = dispatch.mock.calls.filter(([action]) => action === 'management/find').length;
 
-      expect(reads).toBe(2);
+      expect(reads()).toBe(2);
       expect(lizAgentStatus.value.results.map((r) => r.state)).toStrictEqual(['installed', 'installed']);
 
       await ensureLizAgents(store, { again: true });
-      expect(dispatch.mock.calls.filter(([action]) => action === 'management/find')).toHaveLength(4);
+      expect(reads()).toBe(4);
+    });
+  });
+
+  describe("the connection, from Liz's own agent", () => {
+    const CA = { key: 'tls.crt', name: 'cattle-mcp-ca' };
+    const core = (spec: Record<string, unknown>) => ({ ...agent('rancher', 0, { builtIn: true, ...spec }) });
+
+    it('reads only the connection fields it has', () => {
+      expect(connectionOf(core({
+        authenticationType: 'RANCHER', caBundleRef: CA, systemPrompt: 'hers'
+      }))).toStrictEqual({ authenticationType: 'RANCHER', caBundleRef: CA });
+      expect(connectionOf(core({ authenticationType: 'RANCHER' }))).toStrictEqual({ authenticationType: 'RANCHER' });
+      expect(connectionOf(null)).toStrictEqual({});
+    });
+
+    it('adds and replaces the agents with it', async() => {
+      const { store, saved } = storeWith({ rancher: core({ authenticationType: 'RANCHER', caBundleRef: CA }), 'widget-builder': agent('widget-builder', 0) });
+      const status = await installLizAgents(store);
+
+      expect(status.results.map((r) => r.state)).toStrictEqual(['installed', 'updated']);
+      expect(saved.map((a) => [a.metadata.name, a.spec.authenticationType, a.spec.caBundleRef])).toStrictEqual([
+        ['views-builder', 'RANCHER', CA],
+        ['widget-builder', 'RANCHER', CA],
+      ]);
+    });
+
+    it('updates only the connection of a copy that is otherwise current, or newer', async() => {
+      const { store, saved } = storeWith({
+        rancher:          core({ authenticationType: 'RANCHER', caBundleRef: CA }),
+        'views-builder':  agent('views-builder', 2, { authenticationType: 'RANCHER', systemPrompt: 'as it is' }),
+        'widget-builder': agent('widget-builder', 9, { authenticationType: 'RANCHER', caBundleRef: CA }),
+      });
+      const status = await installLizAgents(store);
+
+      expect(status.results.map((r) => r.state)).toStrictEqual(['connected', 'newer']);
+      expect(saved).toHaveLength(1);
+      expect(saved[0].spec).toStrictEqual({
+        displayName: 'views-builder', enabled: true, authenticationType: 'RANCHER', systemPrompt: 'as it is', caBundleRef: CA
+      });
+    });
+
+    it("changes nothing where Liz's own agent has no CA bundle, or cannot be read", async() => {
+      const withoutCa = storeWith({
+        rancher: core({ authenticationType: 'RANCHER' }), 'views-builder': agent('views-builder', 2, { authenticationType: 'RANCHER' }), 'widget-builder': agent('widget-builder', 1)
+      });
+      const unreadable = storeWith({ 'views-builder': agent('views-builder', 2), 'widget-builder': agent('widget-builder', 1) });
+
+      expect((await installLizAgents(withoutCa.store)).results.map((r) => r.state)).toStrictEqual(['current', 'connected']);
+      expect(withoutCa.saved.map((a) => [a.metadata.name, a.spec.authenticationType, a.spec.caBundleRef])).toStrictEqual([['widget-builder', 'RANCHER', undefined]]);
+      expect((await installLizAgents(unreadable.store)).results.map((r) => r.state)).toStrictEqual(['current', 'current']);
+      expect(unreadable.saved).toHaveLength(0);
+    });
+
+    it('does not change the connection of a copy it may not change', async() => {
+      const { store, saved } = storeWith({
+        rancher: core({ authenticationType: 'RANCHER', caBundleRef: CA }), 'views-builder': { ...agent('views-builder', 2), canUpdate: false }, 'widget-builder': agent('widget-builder', 1, { caBundleRef: CA, authenticationType: 'RANCHER' })
+      });
+
+      expect((await installLizAgents(store)).results.map((r) => r.state)).toStrictEqual(['notAllowed', 'current']);
+      expect(saved).toHaveLength(0);
     });
   });
 

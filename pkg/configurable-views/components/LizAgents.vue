@@ -36,6 +36,7 @@ onMounted(() => {
 const COLOR: Record<AgentState, string> = {
   installed:  'bg-success',
   updated:    'bg-success',
+  connected:  'bg-success',
   current:    'bg-success',
   newer:      'bg-info',
   builtIn:    'bg-info',

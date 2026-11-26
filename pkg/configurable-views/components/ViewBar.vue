@@ -8,7 +8,6 @@ import { isMac, shortcutLabel } from '@shell/utils/platform';
 import { RcButton } from '@components/RcButton';
 import { RcDropdown, RcDropdownItem, RcDropdownSeparator, RcDropdownTrigger } from '@components/RcDropdown';
 import { useDragReorder } from '../composables/useDragReorder';
-import { viewBarScroll } from '../composables/viewBarScroll';
 import { isStockView } from '../templating/view-model';
 import type { View } from '../templating/types';
 
@@ -75,7 +74,7 @@ const props = withDefaults(defineProps<{
   startedFrom?: string;
   /** Whether the editor's drawer is open, while editing. */
   drawerOpen?: boolean;
-  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll). */
+  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll, above). */
   page?: string;
   /** What Liz proposed, waiting for approval: tabs of their own after the views, with no menu. */
   drafts?: View[];
@@ -519,6 +518,17 @@ onBeforeUnmount(() => {
 });
 
 defineExpose({ openRename, focusTab });
+</script>
+
+<script lang="ts">
+/**
+ * Where each page's tab strip was scrolled to - by page, as the Home and a cluster's dashboard each have
+ * a bar, and views, of their own. Kept for the module, not for one bar: the bar is drawn again from
+ * scratch when the page switches between Rancher's own page and a view of widgets, which are laid out
+ * differently and each have their own bar. Without it the new bar starts at the beginning of the strip,
+ * so picking a tab far along it jumped the strip back to the start.
+ */
+const viewBarScroll: Record<string, number> = {};
 </script>
 
 

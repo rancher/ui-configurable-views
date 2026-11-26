@@ -125,10 +125,11 @@ export async function fetchTemplatingConfigMaps(store: VuexStore): Promise<void>
     return;
   }
 
+  // Not forced: once read they are watched, so what the store has is current, and the package's own
+  // writes land in it through the models they save. A read that failed is read again next time.
   await store.dispatch('management/findLabelSelector', {
     type:     CONFIG_MAP,
     matching: { namespace: NAMESPACE, labelSelector: { matchLabels: { [LABEL_MARKER]: 'true' } } },
-    opt:      { force: true },
   }).catch(() => undefined);
 }
 
