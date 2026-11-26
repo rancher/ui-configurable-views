@@ -143,6 +143,7 @@ describe('useViewActions and what Liz proposed', () => {
     const confirm = jest.fn().mockResolvedValue(answer);
     const setActiveView = jest.fn();
     const syncActiveView = jest.fn();
+    const settleDraft = jest.fn();
     const pageViews = {
       editing:      ref(false),
       activeViewId: ref<string | null>(view.id),
@@ -155,11 +156,12 @@ describe('useViewActions and what Liz proposed', () => {
       viewById:     (id: string) => (id === view.id ? view : undefined),
       setActiveView,
       syncActiveView,
+      settleDraft,
     } as unknown as PageViewsState;
     const actions = useViewActions(pageViews, { page: 'home', title: 'Home' }, {} as VuexStore, strictT as never, confirm, ref(null), jest.fn());
 
     return {
-      actions, confirm, setActiveView, syncActiveView, pageViews
+      actions, confirm, setActiveView, syncActiveView, settleDraft, pageViews
     };
   }
 
@@ -188,12 +190,15 @@ describe('useViewActions and what Liz proposed', () => {
   });
 
   it('asks before publishing a new view, as publishing does, then opens it', async() => {
-    const { actions, confirm, setActiveView } = setUp(proposal);
+    const {
+      actions, confirm, setActiveView, settleDraft
+    } = setUp(proposal);
 
     await actions.approveDraftView(proposal.id);
 
     expect(confirm.mock.calls[0][0].title).toBe('configurableViews.drafts.approve.title');
     expect(engine.approveDraft).toHaveBeenCalledWith(expect.anything(), 'draft:liz-view-new');
+    expect(settleDraft).toHaveBeenCalledWith(proposal);
     expect(setActiveView).toHaveBeenCalledWith('cm:liz-view-new');
   });
 
@@ -207,30 +212,33 @@ describe('useViewActions and what Liz proposed', () => {
   });
 
   it('publishes nothing when the answer is no', async() => {
-    const { actions } = setUp(proposal, false);
+    const { actions, settleDraft } = setUp(proposal, false);
 
     await actions.approveDraftView(proposal.id);
 
     expect(engine.approveDraft).not.toHaveBeenCalled();
+    expect(settleDraft).not.toHaveBeenCalled();
   });
 
   it('says why, when the view a change replaces went away', async() => {
     engine.approveDraft.mockRejectedValueOnce(new engine.DraftError('targetGone'));
-    const { actions, pageViews } = setUp(change);
+    const { actions, pageViews, settleDraft } = setUp(change);
 
     await actions.approveDraftView(change.id);
 
+    expect(settleDraft).not.toHaveBeenCalled();
     expect(pageViews.error.value).toBe('configurableViews.drafts.error.targetGone');
     expect(pageViews.saving.value).toBe(false);
   });
 
   it('discards after asking, then opens the view the page opens on', async() => {
     const {
-      actions, confirm, syncActiveView, pageViews
+      actions, confirm, syncActiveView, settleDraft, pageViews
     } = setUp(proposal);
 
     await actions.discardDraftView(proposal.id);
 
+    expect(settleDraft).toHaveBeenCalledWith(proposal);
     expect(confirm.mock.calls[0][0]).toMatchObject({ title: 'configurableViews.drafts.discard.title', danger: true });
     expect(engine.discardDraft).toHaveBeenCalledWith(expect.anything(), 'draft:liz-view-new');
     expect(pageViews.activeViewId.value).toBeNull();

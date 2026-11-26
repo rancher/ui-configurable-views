@@ -1,5 +1,5 @@
 import type { VuexStore } from '@shell/types/store/vuex';
-import { ref } from 'vue';
+import { reactive, ref } from 'vue';
 import { contentHash, copyOf, followPublished, usePageViews } from '@pkg/configurable-views/composables/usePageViews';
 import { useViewActions } from '@pkg/configurable-views/composables/useViewActions';
 import type { PageViews, View } from '@pkg/configurable-views/templating/types';
@@ -129,6 +129,19 @@ describe('usePageViews and what Liz proposed', () => {
     expect(page.activeDraft.value).toBeNull();
   });
 
+  it('takes a proposal off the page once it is approved or discarded, and shows a new one by the same name', async() => {
+    const maps = reactive([{ ...proposal, metadata: { ...proposal.metadata, resourceVersion: '1' } }]);
+    const page = viewsWith(maps as unknown as ReturnType<typeof cm>[]);
+    const [shown] = page.drafts.value;
+
+    page.settleDraft(shown);
+    // The store still has it, as when a read it started before the change lands after it
+    expect(page.drafts.value).toStrictEqual([]);
+
+    maps[0].metadata.resourceVersion = '2';
+    expect(page.drafts.value.map((v) => v.id)).toStrictEqual(['draft:liz-view-new']);
+  });
+
   it('leaves the URL alone while the view it names is not there', async() => {
     mockRoute.query = { view: 'draft:liz-view-nothing' };
     const page = viewsWith([proposal]);
@@ -152,14 +165,18 @@ describe('your copy of a published view', () => {
 
   // The page with Liz's view as given, and this person's own views for the Home; writes kept to read back
   function page(published: unknown, mine: PageViews | null = null) {
-    const maps = [{
+    // No published view: Liz's ConfigMap is gone, as after it is unpublished
+    const maps = published === null ? [] : [{
       metadata: {
         name: 'liz-view-platform', namespace: 'default', labels: { [MARKER]: 'true', 'templates.rancher.io/type': 'view' }
       },
       data: { page: 'home', view: JSON.stringify(published) },
     }];
     const prefs: Record<string, unknown> = { 'configurable-views-saved': mine ? { home: JSON.parse(JSON.stringify(mine)) } : {} };
-    const dispatch = jest.fn().mockResolvedValue(undefined);
+    // A ConfigMap the page creates, as publishing creates the organization's: saved as it is
+    const dispatch = jest.fn((action: string, _payload?: unknown) => Promise.resolve(action === 'management/create' ? {
+      metadata: {}, data: {}, save: () => Promise.resolve()
+    } : undefined));
     const store = {
       dispatch,
       commit:  jest.fn(),
@@ -173,7 +190,7 @@ describe('your copy of a published view', () => {
     const views = usePageViews({ page: 'home' }, store, (key: string) => key);
     const confirm = jest.fn().mockResolvedValue(false);
     const actions = useViewActions(views, { page: 'home', title: 'Home' }, store, ((key: string) => key) as never, confirm, ref(null), jest.fn());
-    const written = (): PageViews | undefined => dispatch.mock.calls.filter(([action]) => action === 'prefs/set').pop()?.[1].value.home;
+    const written = (): PageViews | undefined => (dispatch.mock.calls.filter(([action]) => action === 'prefs/set').pop()?.[1] as { value: { home?: PageViews } } | undefined)?.value.home;
 
     return {
       views, actions, confirm, written
@@ -252,6 +269,34 @@ describe('your copy of a published view', () => {
     const mine = written()?.views.find((v) => v.id === 'mine');
 
     expect([mine?.name, mine?.fromHash]).toStrictEqual(['My platform', contentHash(views.orgViews.value[0])]);
+  });
+
+  it('remembers what was published after publishing your changes, so the copy follows that view from then on', async() => {
+    const { actions, confirm, written } = page(before, { views: [copyMadeOf(before, { name: 'My platform' })] });
+
+    confirm.mockResolvedValueOnce(true);
+    await actions.publishView('mine');
+
+    const mine = written()?.views.find((v) => v.id === 'mine') as View;
+
+    expect(mine.fromHash).toBe(contentHash(mine));
+  });
+
+  it('keeps a copy you made your default as the default once its view is unpublished', () => {
+    const { views } = page(null, { views: [copyMadeOf(before, { name: 'My platform' })], defaultViewId: PUBLISHED });
+
+    expect(views.defaultViewId.value).toBe('mine');
+  });
+
+  it('says only that the published view may have changed, before publishing a copy that cannot tell', async() => {
+    const legacy = copyMadeOf(before, { name: 'My platform' });
+
+    delete legacy.fromHash;
+    const { actions, confirm } = page(after, { views: [legacy] });
+
+    await actions.publishView('mine');
+
+    expect(confirm.mock.calls[0][0].body).toBe('configurableViews.page.publish.bodyDiffers');
   });
 
   it('warns before publishing a copy whose published view changed since', async() => {

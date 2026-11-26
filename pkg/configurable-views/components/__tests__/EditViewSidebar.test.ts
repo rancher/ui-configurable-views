@@ -3,7 +3,7 @@ import EditViewSidebar from '@pkg/configurable-views/components/EditViewSidebar.
 import CatalogTile from '@pkg/configurable-views/components/CatalogTile.vue';
 import type { View } from '@pkg/configurable-views/templating/types';
 
-// Two widgets Liz wrote, both approved; one has changed since its approval
+// Two other widgets, both approved; one has changed since its approval
 jest.mock('@pkg/configurable-views/templating/template-engine', () => ({
   ...jest.requireActual('@pkg/configurable-views/templating/template-engine'),
   generatedWidgets: () => [
@@ -26,7 +26,7 @@ jest.mock('@pkg/configurable-views/templating/template-engine', () => ({
 jest.mock('@pkg/configurable-views/templating/widget-hash', () => ({ widgetHash: (source: string) => Promise.resolve(`hash-of:${ source }`) }));
 
 describe('the Add tab', () => {
-  it('offers the widgets Liz wrote only while their code is the code approved', async() => {
+  it('offers the other widgets only while their code is the code approved', async() => {
     const view = {
       id: 'v', name: 'V', gap: 0, pad: 0, widgets: []
     } as unknown as View;

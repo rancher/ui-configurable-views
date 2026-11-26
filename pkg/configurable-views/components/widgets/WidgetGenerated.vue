@@ -34,7 +34,7 @@ import type { CompiledWidget } from '../../templating/widget-compiler';
 import type { GeneratedComponentName } from '../../templating/widget-review';
 import type { WidgetSpec } from '../../templating/types';
 
-// A WIDGET LIZ WROTE — a Vue component from a ConfigMap of its own (see generatedWidgets), compiled in
+// AN OTHER WIDGET, added as code by Liz or by an admin — a Vue component from a ConfigMap of its own (see generatedWidgets), compiled in
 // the page and drawn like any other widget.
 //
 // Only once an admin approved it, and only the exact code approved: the source's hash must match the

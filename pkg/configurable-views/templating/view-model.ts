@@ -33,7 +33,7 @@ const TABLE_KIND = 'table';
 /** The widget that counts a cluster's resources into status cards. */
 const STATUS_KIND = 'statusCards';
 
-/** A widget Liz wrote the code of. */
+/** An other widget: one added as code, by Liz or by an admin. */
 const GENERATED_KIND = 'generated';
 
 /** The widget that holds other widgets, in tabs. */

@@ -91,7 +91,7 @@ export interface WidgetSpec {
   tabs?: WidgetTab[];
   /** A status widget's cards: what is counted, how it is split into cards and rows, and coloured. */
   status?: StatusCardsConfig;
-  /** A widget Liz wrote: the name of the ConfigMap holding its code (see generatedWidgets). */
+  /** An other widget, added as code: the name of the ConfigMap holding it (see generatedWidgets). */
   component?: string;
 }
 
@@ -150,6 +150,8 @@ export interface WidgetNode extends NodeBox {
 export interface DraftInfo {
   replaces?: string;
   replacesName?: string;
+  /** Which version of the proposal's ConfigMap this is. */
+  version?: string;
 }
 
 /**

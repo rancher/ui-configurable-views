@@ -208,17 +208,24 @@ describe('liz-agents', () => {
       jest.resetModules();
       const { ensureLizAgents, lizAgentStatus } = await import('@pkg/configurable-views/templating/liz-agents');
       const { store, dispatch } = storeWith();
-      const reads = () => dispatch.mock.calls.filter(([action, { id }]) => action === 'management/find' && id !== 'cattle-ai-agent-system/rancher').length;
+      // Each read of an agent, and whether it went past the store's copy
+      const reads = () => dispatch.mock.calls.filter(([action]) => action === 'management/find').map(([, spec]) => {
+        const { id, opt } = spec as { id: string, opt: { force?: boolean } };
+
+        return [id.split('/')[1], !!opt.force];
+      });
 
       expect(lizAgentStatus.value.liz).toBe('unknown');
 
       await Promise.all([ensureLizAgents(store), ensureLizAgents(store)]);
 
-      expect(reads()).toBe(2);
+      expect(reads()).toStrictEqual([['rancher', false], ['views-builder', false], ['widget-builder', false]]);
       expect(lizAgentStatus.value.results.map((r) => r.state)).toStrictEqual(['installed', 'installed']);
 
+      // Check again, on Settings: everything read afresh, as something may have changed since
+      dispatch.mockClear();
       await ensureLizAgents(store, { again: true });
-      expect(reads()).toBe(4);
+      expect(reads()).toStrictEqual([['rancher', true], ['views-builder', true], ['widget-builder', true]]);
     });
   });
 

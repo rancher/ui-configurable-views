@@ -38,7 +38,7 @@ const TYPE_CONFIG = 'config';
 const TYPE_VIEW = 'view';
 /** A view Liz proposed, waiting for someone who may publish it (see generatedDrafts). */
 const TYPE_DRAFT = 'view-draft';
-/** A widget Liz wrote the code of - a new kind of widget (see generatedWidgets). */
+/** An other widget, added as code by Liz or by an admin - a new kind of widget (see generatedWidgets). */
 const TYPE_WIDGET = 'widget';
 
 const HOME_CONFIG_NAME = 'templating-home';
@@ -60,7 +60,7 @@ export const PAGE_VIEWS = 'views';
 
 /** A ConfigMap as the management store hands it back: its fields, and `save`. */
 interface ConfigMapModel {
-  metadata: { name: string; labels?: Record<string, string> };
+  metadata: { name: string; labels?: Record<string, string>; resourceVersion?: string };
   data?: Record<string, string>;
   /** Whether the person signed in may change it - from the links Rancher sends with it. */
   canUpdate?: boolean;
@@ -125,8 +125,9 @@ export async function fetchTemplatingConfigMaps(store: VuexStore): Promise<void>
     return;
   }
 
-  // Not forced: once read they are watched, so what the store has is current, and the package's own
-  // writes land in it through the models they save. A read that failed is read again next time.
+  // Not forced, and not read again after the package's own writes: those land in the store through the
+  // models they save, and the store's watch brings anyone else's. Where Rancher pages ConfigMaps on the
+  // server, the read still goes out each time it is asked for.
   await store.dispatch('management/findLabelSelector', {
     type:     CONFIG_MAP,
     matching: { namespace: NAMESPACE, labelSelector: { matchLabels: { [LABEL_MARKER]: 'true' } } },
@@ -235,7 +236,10 @@ export function generatedDrafts(getters: Getters, page: PageKey = PAGE_HOME): Vi
       const view = viewOf(cm, `${ DRAFT_VIEW_PREFIX }${ cm.metadata.name }`);
       const replaces = cm.data?.replaces || '';
 
-      return view ? [{ ...view, draft: replaces ? { replaces, replacesName: viewNamed(getters, replaces) } : {} }] : [];
+      const version = cm.metadata.resourceVersion;
+      const draft = replaces ? { replaces, replacesName: viewNamed(getters, replaces) } : {};
+
+      return view ? [{ ...view, draft: version ? { ...draft, version } : draft }] : [];
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -351,7 +355,7 @@ export async function deleteGeneratedView(store: VuexStore, id: string): Promise
 
 // ---- other widgets: code, by Liz or an admin ----------------------------------------------------
 
-/** A widget whose code Liz wrote, from a ConfigMap of its own. */
+/** An other widget - its code added by Liz or by an admin - from a ConfigMap of its own. */
 export interface GeneratedWidget {
   /** The ConfigMap's name - what a view's widget names it by. */
   name: string;
@@ -360,17 +364,12 @@ export interface GeneratedWidget {
   /** The widget, as a Vue single-file component. */
   source: string;
   created: string;
-  /** When it last changed, by Liz or by hand: the latest write Kubernetes recorded, else when it was created. */
-  updated: string;
-}
-
-/** The time of the latest write Kubernetes recorded for an object, if it kept any. */
-function lastWrite(metadata: { managedFields?: { time?: string }[] }): string {
-  return (metadata.managedFields || []).map((f) => f.time || '').filter(Boolean).sort().pop() || '';
+  /** Which version of its ConfigMap this is: a change gives it a new one. */
+  version: string;
 }
 
 /**
- * The widgets Liz wrote: ConfigMaps labelled type `widget`, each with `displayName`, `description` and
+ * The other widgets: ConfigMaps labelled type `widget`, each with `displayName`, `description` and
  * `component` (a Vue single-file component). Their code only runs once an admin approves it (see
  * widgetApprovals).
  */
@@ -378,15 +377,42 @@ export function generatedWidgets(getters: Getters): GeneratedWidget[] {
   return (getters['management/all']?.(CONFIG_MAP) || [])
     .filter((cm: ConfigMapModel & { metadata: { namespace?: string } }) => cm.metadata?.labels?.[LABEL_MARKER] === 'true' &&
       cm.metadata?.labels?.[LABEL_TYPE] === TYPE_WIDGET && (!cm.metadata.namespace || cm.metadata.namespace === NAMESPACE))
-    .map((cm: ConfigMapModel & { metadata: { creationTimestamp?: string, managedFields?: { time?: string }[] } }) => ({
+    .map((cm: ConfigMapModel & { metadata: { creationTimestamp?: string, resourceVersion?: string } }) => ({
       name:        cm.metadata.name,
       displayName: cm.data?.displayName || cm.metadata.name,
       description: cm.data?.description || '',
       source:      cm.data?.component || '',
       created:     cm.metadata.creationTimestamp || '',
-      updated:     lastWrite(cm.metadata) || cm.metadata.creationTimestamp || '',
+      version:     cm.metadata.resourceVersion || '',
     }))
     .sort((a: GeneratedWidget, b: GeneratedWidget) => a.displayName.localeCompare(b.displayName));
+}
+
+/** The time of the latest write Kubernetes recorded for an object, if it kept any. */
+function lastWrite(metadata: { managedFields?: { time?: string }[] } | undefined): string {
+  return (metadata?.managedFields || []).map((f) => f.time || '').filter(Boolean).sort().pop() || '';
+}
+
+/**
+ * When each widget last changed, by Liz or by hand: the latest write Kubernetes recorded for its ConfigMap,
+ * by name. Read on its own, one widget at a time, because the store's reads leave those records out. A
+ * widget that could not be read is not in it. Never rejects.
+ */
+export async function fetchWidgetChanges(store: VuexStore, names: string[]): Promise<Record<string, string>> {
+  const changed: Record<string, string> = {};
+
+  await Promise.all(names.map(async(name) => {
+    try {
+      const cm = await store.dispatch('management/request', { url: `/v1/${ CONFIG_MAP }s/${ NAMESPACE }/${ name }` });
+      const at = lastWrite(cm?.metadata);
+
+      if (at) {
+        changed[name] = at;
+      }
+    } catch (e) {}
+  }));
+
+  return changed;
 }
 
 /** An approval of a widget's code: exactly which code (the SHA-256 of its source), who approved it and when. */
@@ -504,7 +530,7 @@ export function canApproveWidgets(getters: Getters): boolean {
   return !!schema?.collectionMethods?.some((method) => method.toUpperCase() === 'POST');
 }
 
-/** Remove a widget Liz wrote: its ConfigMap goes, and its approval with it. */
+/** Remove an other widget: its ConfigMap goes, and its approval with it. */
 export async function deleteGeneratedWidget(store: VuexStore, name: string): Promise<void> {
   const cm = cmNamed(store.getters, name) as (ConfigMapModel & { remove(): Promise<unknown> }) | undefined;
 

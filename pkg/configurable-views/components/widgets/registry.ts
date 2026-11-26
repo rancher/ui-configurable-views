@@ -80,6 +80,6 @@ export const WIDGETS: Record<string, WidgetDefinition> = {
   [WIDGET_STATUS_CARDS]:    {
     component: WidgetStatusCards, settings: StatusCardsSettings, source: 'cluster', pluralName: true
   },
-  // A widget Liz wrote: its code is approved by an admin first (see GeneratedWidgetsAdmin).
+  // An other widget, added as code: its code is approved by an admin first (see GeneratedWidgetsAdmin).
   [WIDGET_GENERATED]: { component: WidgetGenerated, source: 'cluster' },
 };

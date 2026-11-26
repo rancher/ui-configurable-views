@@ -74,7 +74,7 @@ const props = withDefaults(defineProps<{
   startedFrom?: string;
   /** Whether the editor's drawer is open, while editing. */
   drawerOpen?: boolean;
-  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll, above). */
+  /** The page the bar is on - where its strip's scroll is kept (see viewBarScroll, in the plain script block). */
   page?: string;
   /** What Liz proposed, waiting for approval: tabs of their own after the views, with no menu. */
   drafts?: View[];

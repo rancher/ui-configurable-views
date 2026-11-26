@@ -1,7 +1,7 @@
 import type { VuexStore } from '@shell/types/store/vuex';
 import {
   appliedViewScopes, approveDraft, canApproveWidgets, discardDraft, DraftError, generatedViews, generatedWidgets, getPageConfig, isTemplatingEnabled, saveView,
-  setWidgetApproval, toggleTemplating, viewsOffInUrl, widgetApprovals
+  setWidgetApproval, toggleTemplating, viewsOffInUrl, widgetApprovals, fetchWidgetChanges
 } from '@pkg/configurable-views/templating/template-engine';
 import { PREF_ENABLED, PREF_VIEWS } from '@pkg/configurable-views/templating/user-prefs';
 import type { PageViews } from '@pkg/configurable-views/templating/types';
@@ -364,7 +364,7 @@ describe('views Liz proposed', () => {
   });
 });
 
-describe('widgets Liz wrote', () => {
+describe('other widgets, added as code', () => {
   const widget = (name: string, data: Record<string, string>) => configMap(name, data, 'widget');
 
   it('reads each from a ConfigMap of its own', () => {
@@ -379,21 +379,20 @@ describe('widgets Liz wrote', () => {
     ]);
   });
 
-  it('says when each was created, and when it last changed: the latest write Kubernetes recorded', () => {
-    const changed = widget('liz-widget-a', { component: '<p />' });
-    const untouched = widget('liz-widget-b', { component: '<p />' });
+  it('says when each was created, and which version of its ConfigMap it is', () => {
+    const one = widget('liz-widget-a', { component: '<p />' });
 
-    Object.assign(changed.metadata, {
-      creationTimestamp: '2026-11-01T10:00:00Z',
-      managedFields:     [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }],
-    });
-    Object.assign(untouched.metadata, { creationTimestamp: '2026-11-02T10:00:00Z' });
-    const { store } = storeWith([changed, untouched]);
+    Object.assign(one.metadata, { creationTimestamp: '2026-11-01T10:00:00Z', resourceVersion: '42' });
+    const { store } = storeWith([one]);
 
-    expect(generatedWidgets(store.getters).map((w) => [w.name, w.created, w.updated])).toStrictEqual([
-      ['liz-widget-a', '2026-11-01T10:00:00Z', '2026-11-20T08:30:00Z'],
-      ['liz-widget-b', '2026-11-02T10:00:00Z', '2026-11-02T10:00:00Z'],
-    ]);
+    expect(generatedWidgets(store.getters).map((w) => [w.name, w.created, w.version])).toStrictEqual([['liz-widget-a', '2026-11-01T10:00:00Z', '42']]);
+  });
+
+  it('reads when each last changed on its own, as the store leaves those records out, and skips one it cannot read', async() => {
+    const dispatch = jest.fn((_: string, { url }: { url: string }) => (url.endsWith('/liz-widget-gone') ? Promise.reject(new Error('404')) : Promise.resolve({ metadata: { managedFields: [{ manager: 'mcp', time: '2026-11-01T10:00:00Z' }, { manager: 'kubectl', time: '2026-11-20T08:30:00Z' }] } })));
+
+    expect(await fetchWidgetChanges({ dispatch } as unknown as VuexStore, ['liz-widget-a', 'liz-widget-gone'])).toStrictEqual({ 'liz-widget-a': '2026-11-20T08:30:00Z' });
+    expect(dispatch).toHaveBeenCalledWith('management/request', { url: '/v1/configmaps/default/liz-widget-a' });
   });
 
   describe('approvals', () => {

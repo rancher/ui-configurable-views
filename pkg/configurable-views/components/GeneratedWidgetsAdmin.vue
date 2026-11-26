@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { useShell } from '@shell/apis';
@@ -8,14 +8,15 @@ import { BadgeState } from '@components/BadgeState';
 import { Banner } from '@components/Banner';
 import DateFormatter from '@shell/components/formatter/Date.vue';
 import {
-  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps, fetchWidgetApprovals, canApproveWidgets
+  generatedWidgets, widgetApprovals, setWidgetApproval, deleteGeneratedWidget, fetchTemplatingConfigMaps, fetchWidgetApprovals, fetchWidgetChanges,
+  canApproveWidgets
 } from '../templating/template-engine';
 import { reviewWidget } from '../templating/widget-review';
 import { useConfirm } from '../composables/useConfirm';
 import { useWidgetHashes } from '../composables/useWidgetHashes';
 
-// The other widgets - added as code, by Liz or by an admin - and the gate in front of them: an admin reads each one's code and approves
-// it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
+// The other widgets - added as code, by Liz or by an admin - and the gate in front of them: an admin
+// reads each one's code and approves it. Approving records the hash of the code as it was read, so a widget runs only as long as its code
 // is what was read - a change sends it back here. Revoking stops it everywhere at once.
 //
 // Only for those who can approve (see canApproveWidgets): anyone else would be shown buttons that fail.
@@ -34,6 +35,14 @@ const refresh = () => Promise.all([fetchTemplatingConfigMaps(store), fetchWidget
 onMounted(refresh);
 
 const widgets = computed(() => generatedWidgets(store.getters));
+
+// When each one last changed, read again whenever one of them does - by name, see fetchWidgetChanges.
+// Only for those who see the list.
+const changed = ref<Record<string, string>>({});
+
+watch(() => (canApprove.value ? widgets.value.map((w) => `${ w.name }@${ w.version }`).join(',') : ''), async(versions) => {
+  changed.value = versions ? await fetchWidgetChanges(store, widgets.value.map((w) => w.name)) : {};
+}, { immediate: true });
 
 // What a reviewer should know before approving: the Rancher components each one draws with, and
 // what it built by hand or reached for outside what it is given
@@ -169,8 +178,8 @@ async function remove(name: string): Promise<void> {
             :data-testid="`generated-widget-dates-${ w.name }`"
           >
             {{ t('configurableViews.generatedAdmin.created') }} <DateFormatter :value="w.created" />
-            <template v-if="w.updated && w.updated !== w.created">
-              · {{ t('configurableViews.generatedAdmin.updated') }} <DateFormatter :value="w.updated" />
+            <template v-if="changed[w.name] && changed[w.name] !== w.created">
+              · {{ t('configurableViews.generatedAdmin.updated') }} <DateFormatter :value="changed[w.name]" />
             </template>
           </span>
         </div>

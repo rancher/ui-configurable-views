@@ -119,17 +119,18 @@ export function useViewActions(
   }
 
   /**
-   * After publishing, YOUR copy becomes a fork of the view you just published.
+   * After publishing, YOUR copy becomes a fork of the view you just published, and remembers what it
+   * showed - your copy's own content, now everyone's - so it follows that view from now on.
    *
    * Without this the bar would show the same view twice — once as yours, once as the organization's —
-   * which is not two views, it is one view and its shadow.
+   * which is not two views, it is one view and its shadow. And a copy whose changes were just published
+   * would still remember the view as it was before, and take the publish for someone else's change.
    */
   async function linkToPublished(source: View, publishedId: string): Promise<void> {
-    if (source.org || source.from === publishedId) {
+    if (source.org || (source.from === publishedId && source.fromHash === contentHash(source))) {
       return;
     }
 
-    // What it shows is what was just published
     if (editing.value) {
       const view = pageViews.workingView();
 
@@ -158,8 +159,10 @@ export function useViewActions(
   async function publishView(id: string): Promise<void> {
     const source = editing.value && id === activeViewId.value ? pageViews.workingView() : pageViews.viewById(id);
 
-    // A copy whose published view changed since it was made would put those changes back as they were
-    const body = source && outdatedIds.value.includes(source.id) ? 'bodyOutdated' : 'body';
+    // A copy whose published view changed since it was made would put those changes back as they were.
+    // One made before copies remembered their source cannot tell: it may have.
+    const outdatedCopy = !!source && outdatedIds.value.includes(source.id);
+    const body = outdatedCopy ? (source?.fromHash ? 'bodyOutdated' : 'bodyDiffers') : 'body';
 
     if (!source || isStockView(source) || !await confirm({
       title:  t('configurableViews.page.publish.title'),
@@ -174,6 +177,7 @@ export function useViewActions(
 
     delete published.org;
     delete published.from;
+    delete published.fromHash;
 
     const at = org.views.findIndex((p) => p.id === published.id || p.name === published.name);
 
@@ -353,6 +357,7 @@ export function useViewActions(
     try {
       const published = await approveDraft(store, id);
 
+      pageViews.settleDraft(view);
       pageViews.setActiveView(published);
     } catch (e) {
       error.value = e instanceof DraftError ? t(`configurableViews.drafts.error.${ e.reason }`) : (e as Error)?.message || String(e);
@@ -379,6 +384,7 @@ export function useViewActions(
 
     try {
       await discardDraft(store, id);
+      pageViews.settleDraft(view);
       activeViewId.value = null;
       pinnedView.value = false;
       pageViews.syncActiveView();

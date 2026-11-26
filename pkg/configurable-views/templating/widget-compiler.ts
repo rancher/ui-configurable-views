@@ -1,4 +1,4 @@
-// Compiles a widget Liz wrote - a Vue single-file component held in a ConfigMap - into a live component.
+// Compiles an other widget - a Vue single-file component held in a ConfigMap - into a live component.
 //
 // With @vue/compiler-sfc, in the browser: the same compiler the Vue SFC Playground uses. It is large,
 // so this module is only ever loaded through a dynamic import (see WidgetGenerated) - a chunk of its

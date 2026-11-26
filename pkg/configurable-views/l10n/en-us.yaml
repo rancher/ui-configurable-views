@@ -64,6 +64,7 @@ configurableViews:
       title: Publish to the organization?
       body: "“{name}” becomes an organization template: everyone sees it on their {page}, and can fork their own copy of it."
       bodyOutdated: "The published “{name}” was changed for everyone since you made your copy. Publishing your copy replaces those changes, for everyone on their {page}."
+      bodyDiffers: "Your copy of “{name}” is not what is published for everyone, which may have changed since you made it. Publishing your copy replaces what is published, for everyone on their {page}."
       action: Publish
     unpublish:
       title: Unpublish this view?

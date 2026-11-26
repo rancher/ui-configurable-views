@@ -7,6 +7,7 @@ const mockState = {
   confirm:    jest.fn(),
   approve:    jest.fn(),
   remove:     jest.fn(),
+  changes:    {} as Record<string, string>,
 };
 
 // The stored widgets and approvals, as Vue refs, so a change shows on the page as the store's would.
@@ -24,6 +25,7 @@ jest.mock('@pkg/configurable-views/templating/template-engine', () => {
     deleteGeneratedWidget:     (...args: unknown[]) => mockState.remove(...args),
     fetchTemplatingConfigMaps: () => Promise.resolve(),
     fetchWidgetApprovals:      () => Promise.resolve(),
+    fetchWidgetChanges:        () => Promise.resolve(mockState.changes),
   };
 });
 // A hash that says which code it is of
@@ -31,7 +33,7 @@ jest.mock('@pkg/configurable-views/templating/widget-hash', () => ({ widgetHash:
 jest.mock('@pkg/configurable-views/composables/useConfirm', () => ({ useConfirm: () => mockState.confirm }));
 jest.mock('@shell/apis', () => ({ useShell: () => ({ notification: { send: jest.fn() } }) }));
 
-type Widget = { name: string; displayName: string; description: string; source: string; created: string; updated?: string };
+type Widget = { name: string; displayName: string; description: string; source: string; created: string; version?: string };
 const { mockStored } = jest.requireMock('@pkg/configurable-views/templating/template-engine') as {
   mockStored: { widgets: { value: Widget[] }; approvals: { value: Record<string, { hash: string; by: string; at: string }> } };
 };
@@ -51,7 +53,7 @@ async function mountAdmin() {
 
 const button = (wrapper: Awaited<ReturnType<typeof mountAdmin>>, what: string) => wrapper.find(`[data-testid="generated-widget-${ what }-liz-widget-a"]`);
 
-describe('the widgets Liz wrote, on Settings', () => {
+describe('the other widgets, on Settings', () => {
   beforeEach(() => {
     mockState.canApprove = true;
     mockStored.widgets.value = [widget('<p>one</p>')];
@@ -116,17 +118,14 @@ describe('the widgets Liz wrote, on Settings', () => {
   });
 
   it('says when it was created, and when it last changed if it did since', async() => {
-    mockStored.widgets.value = [{
-      ...widget('<p>one</p>'), created: '2026-11-01T10:00:00Z', updated: '2026-11-20T08:30:00Z'
-    }];
+    mockStored.widgets.value = [{ ...widget('<p>one</p>'), created: '2026-11-01T10:00:00Z' }];
+    mockState.changes = { 'liz-widget-a': '2026-11-20T08:30:00Z' };
     const changed = await mountAdmin();
 
     expect(button(changed, 'dates').text()).toContain('configurableViews.generatedAdmin.created');
     expect(button(changed, 'dates').text()).toContain('configurableViews.generatedAdmin.updated');
 
-    mockStored.widgets.value = [{
-      ...widget('<p>one</p>'), created: '2026-11-01T10:00:00Z', updated: '2026-11-01T10:00:00Z'
-    }];
+    mockState.changes = { 'liz-widget-a': '2026-11-01T10:00:00Z' };
     const untouched = await mountAdmin();
 
     expect(button(untouched, 'dates').text()).not.toContain('configurableViews.generatedAdmin.updated');

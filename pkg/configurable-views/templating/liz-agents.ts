@@ -148,26 +148,27 @@ export function lizAccess(getters: Getters): { liz: boolean; allowed: boolean } 
 }
 
 /** Liz's own agent, or null where it is not there or not readable */
-async function findCore(store: VuexStore): Promise<AgentConfig | null> {
+async function findCore(store: VuexStore, force: boolean): Promise<AgentConfig | null> {
   try {
     return await store.dispatch('management/find', {
-      type: AGENT_CONFIG, id: `${ CORE_AGENT.namespace }/${ CORE_AGENT.name }`, opt: { watch: false }
+      type: AGENT_CONFIG, id: `${ CORE_AGENT.namespace }/${ CORE_AGENT.name }`, opt: { watch: false, force }
     });
   } catch (e) {
     return null;
   }
 }
 
-async function installOne(store: VuexStore, ours: AgentConfig, connection: Connection): Promise<AgentResult> {
+async function installOne(store: VuexStore, ours: AgentConfig, connection: Connection, force: boolean): Promise<AgentResult> {
   const { name, namespace } = ours.metadata;
   const base = { name, displayName: ours.spec.displayName };
   const spec = { ...clone(ours.spec), ...clone(connection) };
   let theirs: AgentModel | null = null;
 
-  // Read from the store's copy when it has one: installing an extension takes a reload, which empties it
+  // Read from the store's copy when it has one - installing an extension takes a reload, which empties it -
+  // unless asked to read them again (Check again on Settings)
   try {
     theirs = await store.dispatch('management/find', {
-      type: AGENT_CONFIG, id: `${ namespace }/${ name }`, opt: { watch: false }
+      type: AGENT_CONFIG, id: `${ namespace }/${ name }`, opt: { watch: false, force }
     });
   } catch (e) {
     if (!isNotFound(e)) {
@@ -244,7 +245,7 @@ async function installOne(store: VuexStore, ours: AgentConfig, connection: Conne
  * Check every agent and add or update what is missing or older. Never rejects: a failure is in the
  * agent's result. Exported for Settings and the tests; pages call ensureLizAgents.
  */
-export async function installLizAgents(store: VuexStore, agents: AgentConfig[] = AGENTS): Promise<AgentStatus> {
+export async function installLizAgents(store: VuexStore, agents: AgentConfig[] = AGENTS, { force = false } = {}): Promise<AgentStatus> {
   const { liz, allowed } = lizAccess(store.getters);
 
   if (!liz || !allowed) {
@@ -254,11 +255,11 @@ export async function installLizAgents(store: VuexStore, agents: AgentConfig[] =
   }
 
   const results: AgentResult[] = [];
-  const connection = connectionOf(await findCore(store));
+  const connection = connectionOf(await findCore(store, force));
 
   // One after the other: two agents, and an order that reads the same in Settings every time
   for (const agent of agents) {
-    results.push(await installOne(store, agent, connection));
+    results.push(await installOne(store, agent, connection, force));
   }
 
   return {
@@ -276,7 +277,7 @@ let checking: Promise<AgentStatus> | null = null;
 /** Once each time Rancher loads, whichever page asks first. Settings can ask again with `again`. */
 export function ensureLizAgents(store: VuexStore, { again = false } = {}): Promise<AgentStatus> {
   if (!checking || again) {
-    checking = installLizAgents(store).then((status) => {
+    checking = installLizAgents(store, AGENTS, { force: again }).then((status) => {
       lizAgentStatus.value = status;
 
       return status;

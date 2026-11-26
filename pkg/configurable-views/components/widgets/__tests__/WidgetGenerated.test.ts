@@ -56,7 +56,7 @@ async function render() {
 
 const message = (wrapper: Awaited<ReturnType<typeof render>>) => wrapper.find('.card-message').text();
 
-describe('a widget Liz wrote', () => {
+describe('an other widget', () => {
   beforeEach(() => {
     mockState.widgets = [written('<p>v1</p>')];
     mockState.approvals = {};

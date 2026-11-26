@@ -32,7 +32,7 @@ export interface CatalogEntry {
    * ready-made widget whose title says what it was set up for.
    */
   titleKey?: string;
-  /** A tile's name and description as they are - for an entry the catalog does not translate (a widget Liz wrote). */
+  /** A tile's name and description as they are - for an entry the catalog does not translate (an other widget, added as code). */
   label?: string;
   desc?: string;
 }
@@ -50,7 +50,7 @@ export function generatedEntries(widgets: { name: string; displayName: string; d
     label:    w.displayName,
     desc:     w.description,
     icon:     'table',
-    // Full width: a widget Liz writes is often a table, which needs the room. Resized like any other.
+    // Full width: an other widget is often a table, which needs the room. Resized like any other.
     span:     12,
     spec:     {
       kind: WIDGET_GENERATED, title: '', component: w.name

@@ -152,12 +152,13 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
 
   /**
    * The view a set opens on. A default can name a published view, which a copy of it then stands in for:
-   * making a view your default does not copy it, so it keeps following the published view.
+   * making a view your default does not copy it, so it keeps following the published view. Once that
+   * view is unpublished, the copy is kept as a view of your own, and stays the default.
    */
   function resolveDefault(set: PageViews | null | undefined): string {
     const id = set?.defaultViewId || '';
 
-    return (id && orgIds.value.has(id) && set?.views.find((p) => p.from === id)?.id) || id;
+    return (id && !set?.views.some((p) => p.id === id) && set?.views.find((p) => p.from === id)?.id) || id;
   }
 
   const defaultViewId = computed(() => resolveDefault(editing.value ? working.value : userSet.value));
@@ -182,9 +183,24 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     return orderViews(list, set?.order, (view) => orderKeyOf(view, orgIds.value), resolveDefault(set));
   });
 
+  // Proposals approved or discarded on this page, by id and version: the store can hold one a few
+  // seconds longer, when a read it started before the change lands after it. Each goes from here once
+  // the store no longer has it, so a new proposal by the same name shows.
+  const settled = ref<string[]>([]);
+  const draftKey = (view: View): string => `${ view.id }@${ view.draft?.version || '' }`;
+
   // What Liz proposed for this page, for those who may publish it (see generatedDrafts): tabs of their
   // own after the views, never ordered, edited or made the default. Out of the way while editing.
-  const drafts = computed<View[]>(() => (editing.value ? [] : scopes.value.drafts));
+  const drafts = computed<View[]>(() => (editing.value ? [] : scopes.value.drafts.filter((p) => !settled.value.includes(draftKey(p)))));
+
+  watch(() => scopes.value.drafts.map(draftKey), (now) => {
+    settled.value = settled.value.filter((key) => now.includes(key));
+  });
+
+  /** A proposal is approved or discarded: it leaves the page now, whatever the store still holds. */
+  function settleDraft(view: View): void {
+    settled.value = [...settled.value, draftKey(view)];
+  }
 
   /** The tabs showing a published view, or your copy of one. */
   const publishedIds = computed(() => views.value.filter((p) => p.org || (p.from && orgIds.value.has(p.from))).map((p) => p.id));
@@ -217,7 +233,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
       return id;
     }
 
-    return views.value.find((p) => p.from === id && orgIds.value.has(id))?.id || id;
+    return views.value.find((p) => p.from === id)?.id || id;
   }
 
   /** A view of the bar, or a draft: anything that can be open */
@@ -408,6 +424,7 @@ export function usePageViews(props: { page: PageKey }, store: VuexStore, t: I18n
     changedIds,
     outdatedIds,
     viewIdFor,
+    settleDraft,
     activeView,
     activeDraft,
     isNewView,
